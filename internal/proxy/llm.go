@@ -20,20 +20,31 @@ const (
 	maxRewriteBody = 32 << 20
 )
 
-// injectLLM applies the fault types for the Anthropic Messages API.
+// injectLLM applies the LLM fault types, in Anthropic Messages API format or,
+// for a chat completions request, in OpenAI format.
 func (p *Proxy) injectLLM(w http.ResponseWriter, r *http.Request, rt *route, rest string, d decision, base forwardOpts) outcome {
 	rule, prm := d.rule, d.rule.params
+	chat := isChatCompletions("/" + rest)
 	switch rule.spec.Type {
 	case fault.LLMRateLimit:
+		body := llmRateLimitBody
+		if chat {
+			body = chatRateLimitBody
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", strconv.Itoa(*prm.RetryAfter))
-		p.respond(w, rule, http.StatusTooManyRequests, llmRateLimitBody)
+		p.respond(w, rule, http.StatusTooManyRequests, body)
 		return outcome{status: http.StatusTooManyRequests, retryAfter: prm.RetryAfter}
 
 	case fault.LLMOverloaded:
+		// OpenAI has no 529; an overloaded engine answers 503.
+		status, body := 529, llmOverloadedBody
+		if chat {
+			status, body = http.StatusServiceUnavailable, chatOverloadedBody
+		}
 		w.Header().Set("Content-Type", "application/json")
-		p.respond(w, rule, 529, llmOverloadedBody)
-		return outcome{status: 529}
+		p.respond(w, rule, status, body)
+		return outcome{status: status}
 
 	case fault.LLMStreamCut:
 		base.hasCut, base.cutAfter = true, int64(prm.AfterBytes)
@@ -43,11 +54,17 @@ func (p *Proxy) injectLLM(w http.ResponseWriter, r *http.Request, rt *route, res
 
 	case fault.LLMTruncate:
 		base.rewrite = func(w http.ResponseWriter, r *http.Request, resp *http.Response, o forwardOpts) outcome {
+			if chat {
+				return p.rewriteLLM(w, r, resp, o, truncateChat(prm.MaxChars), func() sseRewriter { return &truncateChatStream{max: prm.MaxChars, sent: map[string]int{}} })
+			}
 			return p.rewriteLLM(w, r, resp, o, truncateMessage(prm.MaxChars), func() sseRewriter { return &truncateStream{max: prm.MaxChars} })
 		}
 
 	case fault.LLMMalformedToolCall:
 		base.rewrite = func(w http.ResponseWriter, r *http.Request, resp *http.Response, o forwardOpts) outcome {
+			if chat {
+				return p.rewriteLLM(w, r, resp, o, malformChat, func() sseRewriter { return &malformChatStream{seen: map[string]bool{}} })
+			}
 			return p.rewriteLLM(w, r, resp, o, malformMessage, func() sseRewriter { return &malformStream{seen: map[any]bool{}} })
 		}
 	}
