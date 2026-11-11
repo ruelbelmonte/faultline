@@ -321,6 +321,37 @@ Known gaps:
 - Memory per run still grows with driver traffic (about 50 bytes per driver request) and with the number of retry gaps found (D82).
 - A ring overflow is visible in the proxy log only (D83). It never occurred in any test.
 
+## Work item 4: UI verification
+
+Built: Firefox and WebKit projects in the Playwright run; `ui/e2e/a11y.spec.ts`, an axe audit (WCAG 2.0 and 2.1 A and AA plus best-practice rules) of every page in light and dark colour scheme, in all three browsers; shared test helpers in `ui/e2e/helpers.ts`; `make test-ui` and the CI workflow install and run all three browsers (D85 to D87).
+
+| Command | Where | Result |
+|---|---|---|
+| `npx playwright test` in `ui/` (6 projects: smoke and a11y for chromium, firefox, webkit) | Windows | 42 pass, 0 fail, 0 skip |
+| same, in `mcr.microsoft.com/playwright:v1.65.0-noble` against Linux binaries | Linux container | 42 pass, 0 fail, 0 skip |
+| `npm run build` in `ui/` | Windows | ok; `internal/ui/dist` unchanged |
+| `go vet`, `gofmt`, `go test ./... -count=1` | Windows | clean; 143 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 78 top-level tests pass, 0 fail, 0 skip (210s) |
+| `sh .tools/race.sh "make lint && make test-race"` | Linux container | lint clean; unit and integration ok with `-race` (241s) |
+| compose example | Docker Desktop | passed, failed, failed, passed; exit 10 |
+| acceptance suite | Windows | 56 passed, 0 failed, 0 skipped |
+
+What the new checks found:
+
+- **Axe: no violation** on any of the nine page states, in either colour scheme, in any browser. Nothing in the dashboard needed fixing. The audit was shown to be able to fail by planting three problems (image without alt text, unlabelled input, low-contrast text), which axe reported in all three browsers.
+- **Firefox: a page crash in the test tooling**, not in the dashboard. Once axe has run in a Firefox process, a Playwright locator polling the text of the editor's error list crashes the page. The same page state reached without that poll does not crash. Handled by running the audit as its own project per browser and waiting on the status line (D86). The root cause inside Firefox was not found.
+- **WebKit: Tab does not stop at links**, which is Safari's default. The keyboard test asserts the skip link in Chromium and Firefox only; the rest of it (reach the kill switch, open and dismiss the dialog from the keyboard) runs in all three (D87).
+
+The smoke test's assertions are unchanged apart from that one WebKit condition.
+
+Gate: **Green.**
+
+Known gaps:
+
+- No screen reader was used. Axe checks what can be checked mechanically; it cannot judge the canvas timeline (its numbers are repeated in a table) or whether the reading order makes sense when spoken.
+- Safari on macOS itself was not tested: Playwright's WebKit build on Windows and Linux stands in for it.
+- D38 still holds: an experiment with a sensitive header cannot be run from the editor with its real value.
+
 ---
 
 # Final report

@@ -30,9 +30,10 @@ test-race:
 test-load:
 	$(GO) test -tags "integration load" ./test/integration/ -run TestLoad -count=1 -v -timeout 10m
 
-# Playwright smoke test of the UI against real processes.
+# Playwright smoke test and axe accessibility audit of the UI against real
+# processes, in Chromium, Firefox and WebKit.
 test-ui: build
-	cd ui && npm ci && npx playwright install chromium && npx playwright test
+	cd ui && npm ci && npx playwright install chromium firefox webkit && npx playwright test
 
 lint:
 	$(GO) vet ./...

@@ -23,7 +23,7 @@ Alternatives: `testing.Short()`. Reason: `make test` stays fast and `make test-i
 | `go.yaml.in/yaml/v3` | The standard library has no YAML parser. The node API is needed for unknown-key detection, dotted error paths and in-place redaction. This is the maintained continuation of `gopkg.in/yaml.v3`. |
 | `modernc.org/sqlite` | Mandated by the PRD (pure Go, no cgo). |
 
-UI build-time dependencies (not shipped in the Go binary other than as built assets): `vue`, `vite`, `typescript`, `@vitejs/plugin-vue`, `vue-tsc`, `uplot`, `@playwright/test`. All named or implied by PRD sections 4 and 14.
+UI build-time dependencies (not shipped in the Go binary other than as built assets): `vue`, `vite`, `typescript`, `@vitejs/plugin-vue`, `vue-tsc`, `uplot`, `@playwright/test`. All named or implied by PRD sections 4 and 14. `@axe-core/playwright` was added for the accessibility audit (D85).
 
 ## Configuration
 
@@ -183,7 +183,7 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 
 **D70. Colour is never the only signal:** verdicts and results carry a symbol and a word, chart lines differ by dash pattern, fault windows and phase boundaries are labelled, and the timeline numbers are available as a table. Light and dark follow the system setting.
 
-**D71. The UI smoke test is Playwright (Chromium) against real `faultline-demo`, `faultline proxy` and `faultline control` processes** started by `ui/e2e/stack.mjs` on ports 17700-17702 and 19000-19003. It is a separate gate (`make test-ui`), not part of `go test`.
+**D71. The UI smoke test is Playwright (Chromium; since D85 also Firefox and WebKit) against real `faultline-demo`, `faultline proxy` and `faultline control` processes** started by `ui/e2e/stack.mjs` on ports 17700-17702 and 19000-19003. It is a separate gate (`make test-ui`), not part of `go test`.
 
 ## Control plane (addendum)
 
@@ -238,3 +238,13 @@ Alternatives: keep them in memory (the previous behaviour, about 250 bytes per p
 **D83. The proxy warns when its ring overwrites a record nobody read.** The ring remembers the highest sequence number it has handed to a reader; overwriting a newer record logs one warning per run. Control drains the ring every second during injection, 5,000 records per call until it is empty, so this needs a rate the load test does not reach or a stalled control plane. Alternative: report it through the admin API. Rejected because it would add a field to a contract. Consequence: the loss is visible in the proxy log only, not in the run's report.
 
 **D84. The load test is `TestLoadProxyOverhead`, behind the extra build tag `load` (`make test-load`).** It is closed loop: 1 and 64 keep-alive connections, each measured for 5 s (`FAULTLINE_LOAD_SECONDS`), against an in-process upstream, directly, through the proxy with no run, and through the proxy during a real control run whose fault never matches (so every request is matched against the rules, recorded, collected by control and written to SQLite). It fails only on request errors or if the run's request count differs from the number of requests sent, which would mean lost records; it sets no speed threshold, because that would fail on a slow machine without a defect. Not part of `make test-integration`: it measures, and it loads the machine while timing-sensitive tests run.
+
+## UI verification
+
+**D85. The UI gate runs in Chromium, Firefox and WebKit, with an axe audit of every page.** This supersedes the "(Chromium)" in D71. `ui/e2e/a11y.spec.ts` runs `@axe-core/playwright` with the WCAG 2.0 and 2.1 A and AA rule sets plus axe's best-practice rules, in light and in dark colour scheme, on: the token gate (also with a rejected token), the runs list, the run detail of a finished run and of an active run, the kill switch dialog, the experiments editor (valid and with errors) and the audit log. `@axe-core/playwright` is a new build-time dependency of `ui/` only; nothing of it ships. Alternative: a hand-written set of checks, which would cover far less than axe's rule set.
+
+Axe found no violation on any page in any browser, so there was nothing to fix in the product. That the audit can fail was checked by planting an image without alt text, an unlabelled input and low-contrast text: all three were reported in all three browsers. What axe cannot judge stays unverified: the timeline is drawn on a canvas (its numbers are repeated in a table for that reason, D70), and no screen reader was used.
+
+**D86. The accessibility audit is its own Playwright project per browser, and waits on the status line rather than the error list.** In Playwright's Firefox build, once axe has run anywhere in a browser process, polling the text of the editor's error list with a Playwright locator crashes the page ("Page crashed"). Established by elimination: the same edit without axe does not crash; after axe, the same page state does not crash when it is produced by hand, when the validation reply is replayed through a route, or when the real reply is used and the test simply waits; it crashes only when `toContainText` polls `experiment-errors`. So it is the test tooling in that browser, not the dashboard's markup, and the root cause inside Firefox was not found. Consequences: `chromium-a11y`, `firefox-a11y` and `webkit-a11y` are separate projects, so the smoke test (which does poll that list) never shares a browser process with axe; and the audit's error-state test waits for "1 problem" on the status line, then counts the list items after the audit.
+
+**D87. In WebKit the keyboard test does not assert the skip link.** Safari's default is that Tab stops at buttons and form fields but not at links; links are reached with Option+Tab, which Playwright's WebKit does not send (measured: Tab and Alt+Tab both go straight to the kill switch). The test still tabs to the kill switch and opens and dismisses its dialog from the keyboard in WebKit; the skip link assertion runs in Chromium and Firefox. Nothing was changed in the product: this is the browser's convention, and the links are ordinary `<a href>` elements.
