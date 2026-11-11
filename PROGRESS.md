@@ -236,6 +236,31 @@ Gate: unchanged from the continuation baseline above, since no code changed.
 
 Known gaps: the suite was run on Windows only, once at this point and again after the later work items (see the final report).
 
+## Work item 2: request header fidelity (PRD 8.1)
+
+Built: `internal/proxy/rawhead.go`. Request header lines now reach the upstream with the client's spelling, in the client's order, with duplicates as separate lines. The proxy keeps the raw head of each request as it is read (`inConn`), uses it only when it says exactly what Go's server parsed, and rewrites the head Go writes upstream (`outConn`). Upstream connections are now HTTP/1.1 only, also over TLS. Design, limits and alternatives: DECISIONS D80; user-facing description: `docs/architecture.md`.
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags integration ./test/...`, `gofmt -l cmd internal test` | Windows | clean |
+| `go test ./... -count=1` | Windows | 140 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 78 top-level tests pass, 0 fail, 0 skip (209s) |
+| `npx playwright test` in `ui/` | Windows, Chromium | 7 pass |
+| `sh .tools/race.sh "make lint && make test-race"` | Linux container | lint clean; unit and integration ok with `-race` (242s) |
+| compose example, `faultline run examples/experiments/ --fail-on-breach` | Docker Desktop | passed, failed, failed, passed; exit 10 |
+| acceptance suite | Windows | 56 passed, 0 failed, 0 skipped |
+
+Gate: `TestRequestHeadersArePreservedByteForByte` (real proxy process; a raw TCP client sends mixed-case, unordered, duplicated headers; a raw TCP upstream compares the bytes it receives: spelling, order, duplicates, hop-by-hop removal, `Host` rewritten in place, keep-alive reuse after a chunked body, a faulted request, pipelined requests) and `TestRequestHeaderFidelityUnderConcurrency` (8 connections, 320 requests, each checked against its own headers). Unit tests: framing across fixed, chunked and pipelined requests, fallback, head rewriting, an `https` upstream that offers HTTP/2 and is still spoken to in HTTP/1.1 with the exact head. **Green.**
+
+Two mistakes in the new tests' own data were fixed while getting to green (a chunk size that did not match its data, and a channel too small for the concurrency test); no assertion was loosened.
+
+Known gaps:
+
+- **Response** header names are still canonicalised and sorted by Go on the way back to the client. PRD 8.1 states fidelity for the forwarded request only, so this is recorded rather than built.
+- Fallback to canonical, sorted names: a request with an obsolete folded header (and the rest of that client connection), and an `https` upstream reached through `HTTPS_PROXY`.
+- Normalised, not preserved: whitespace around header values, line endings, and the chunk boundaries of a chunked request body.
+- `https` upstreams no longer use HTTP/2.
+
 ---
 
 # Final report
