@@ -146,3 +146,31 @@ Design change made while writing the gate tests, recorded as D53: the first expe
 Closed from M3's known gaps: reports and findings exist, so `TestRedactionOfSecrets` now scans all four report formats and the report files on disk.
 
 Known gaps: none for M5.
+
+## M6: web UI
+
+Built: `ui/` (Vue 3, TypeScript, Vite, uPlot): token gate, header with kill switch, active run indicator and environment badge, runs list, run detail (verdict banner, KPI tiles, live timeline over the event stream with fault windows, phase boundaries and abort marker, hypothesis, findings with evidence, fault triggers, four export buttons, abort button), experiments editor with debounced validation, audit log. Built assets are embedded from `internal/ui/dist`. `GET /api/v1/meta` added for the environment badge (D65).
+
+Also fixed after M5 (security review of the M5 commit): the CLI validates run ids before using them in URLs or report paths, rejects non-HTTP control URLs and warns when the token would travel over plain HTTP to a non-loopback host.
+
+| Command | Where | Result |
+|---|---|---|
+| `npm run build` in `ui/` (`vue-tsc --noEmit && vite build`) | Windows | ok, no type errors |
+| `npx playwright test` in `ui/` | Windows, Chromium | 7 pass, 0 fail, 0 skip |
+| `go vet ./... && go vet -tags integration ./test/...` | Windows, Linux | clean |
+| `go test ./...` | Windows | 133 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 75 top-level tests pass, 0 fail, 0 skip |
+| `go test ./... -race` | Linux container | ok |
+| `FAULTLINE_ITEST_RACE=1 go test -race -tags integration ./test/integration/ -count=1 -timeout 30m` | Linux container | ok (238s) |
+
+Gate, `ui/e2e/smoke.spec.ts` against real demo, proxy and control processes: token gate (wrong token rejected, right one accepted, stale one cleared), runs list, run detail verdict, kill switch (confirmation, faults cleared, run aborted), the four export buttons (each download's name and content checked), plus the experiment editor, audit log and keyboard-only use. `TestEmbeddedUI` checks that the binary serves the built UI with all nine PRD `data-testid` values. **Green.**
+
+The run detail and runs list were also checked by eye in light and dark mode from screenshots.
+
+Two problems surfaced by the first Linux race run of this milestone, both fixed: the test harness could hand the same free port to two servers (it now remembers ports it has given out), and the `run_aborted` audit entry was written after the aborted status was visible (D72).
+
+Known gaps:
+
+- The Playwright test has only been run on Windows with Chromium. Firefox and WebKit are not covered.
+- Accessibility was built in (labels, focus order, dialog semantics, non-colour signals) and one keyboard path is tested, but no screen reader or automated accessibility audit was run.
+- An experiment with a sensitive header cannot be run from the UI editor with its real value (D38).

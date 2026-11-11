@@ -50,6 +50,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // Handler serves /healthz, the authenticated API under /api/v1 and the UI.
 func (c *Control) Handler() http.Handler {
 	api := http.NewServeMux()
+	api.HandleFunc("GET /api/v1/meta", c.handleMeta)
 	api.HandleFunc("GET /api/v1/routes", c.handleRoutes)
 	api.HandleFunc("GET /api/v1/experiments", c.handleExperiments)
 	api.HandleFunc("GET /api/v1/experiments/{name}", c.handleExperimentGet)
@@ -82,6 +83,16 @@ func (c *Control) Handler() http.Handler {
 	})
 	mux.Handle("/", ui.Handler())
 	return mux
+}
+
+// handleMeta tells the UI what it is looking at. It is not in the PRD's
+// endpoint table; the header's environment badge has no other source.
+func (c *Control) handleMeta(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"environment":    c.cfg.Environment,
+		"allow_unscoped": c.cfg.AllowUnscoped,
+		"scope_header":   c.cfg.ScopeHeader,
+	})
 }
 
 func (c *Control) handleRoutes(w http.ResponseWriter, r *http.Request) {

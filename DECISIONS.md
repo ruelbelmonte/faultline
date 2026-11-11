@@ -166,3 +166,25 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 **D62. Interrupting `faultline run` (Ctrl+C) aborts the run it started and exits 1.** Leaving faults injecting after the operator walked away would be the unsafe default.
 
 **D63. A new run may be created the moment the previous one shows a terminal status.** Control finishes writing the previous run's reports first (it waits up to 15 s) instead of answering 409, so `faultline run <dir>` and API clients that poll for completion do not race it.
+
+## Web UI
+
+**D64. The built UI (`internal/ui/dist`) is committed.** Alternative: build it during `go build`. Reason: `go build ./...` and `go install` work from a clean checkout without Node. `make ui` rebuilds it; the Dockerfile and CI rebuild it from source.
+
+**D65. One endpoint beyond the PRD table: `GET /api/v1/meta`** returns `{environment, allow_unscoped, scope_header}` (bearer token required). Reason: the header's environment badge has no other source, the UI must work from the API alone, and no existing contract was changed to provide it. The token gate also uses it to check a token.
+
+**D66. Routing is hash based and hand written (`#/runs`, `#/runs/{id}`, `#/experiments`, `#/audit`); no router or UI framework dependency.** Charting is uPlot, as the PRD suggests.
+
+**D67. The kill switch confirmation is a native `<dialog>`** opened with `showModal()`, which gives focus trapping and Escape to cancel without extra code. Extra test ids beyond the PRD's nine: `kill-confirm`, `kill-result`, `active-run`, `abort-run`, `kpi-requests`, `kpi-faults`, `experiment-name`, `experiment-yaml`, `experiment-status`, `experiment-errors`, `experiment-save`, `experiment-run`, `audit-table`.
+
+**D68. Export buttons fetch the report with the `Authorization` header and hand the browser a blob.** A plain link could not carry the token. They are disabled until the run is terminal, matching D56.
+
+**D69. The token is kept in `sessionStorage` only, is never put in a URL, and is removed on the first 401.** The UI is served with `Content-Security-Policy: default-src 'self'`, `X-Frame-Options: DENY`, `nosniff` and `no-referrer`.
+
+**D70. Colour is never the only signal:** verdicts and results carry a symbol and a word, chart lines differ by dash pattern, fault windows and phase boundaries are labelled, and the timeline numbers are available as a table. Light and dark follow the system setting.
+
+**D71. The UI smoke test is Playwright (Chromium) against real `faultline-demo`, `faultline proxy` and `faultline control` processes** started by `ui/e2e/stack.mjs` on ports 17700-17702 and 19000-19003. It is a separate gate (`make test-ui`), not part of `go test`.
+
+## Control plane (addendum)
+
+**D72. The `run_aborted` audit entry is written before the aborted status becomes visible through the API.** Found by the Linux race run: a client that saw `aborted` could read the audit log before the entry existed.

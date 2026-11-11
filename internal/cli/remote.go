@@ -9,10 +9,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -31,8 +34,19 @@ const (
 	exitAborted      = 12
 )
 
+// runIDRE is the only shape of run id the CLI puts into a URL or a file path.
+var runIDRE = regexp.MustCompile(`^run_[a-z2-7]{12}$`)
+
 // errUsage marks a problem with how the command was invoked (exit 2).
 var errUsage = errors.New("usage")
+
+func loopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 type remote struct {
 	base  string
@@ -70,7 +84,16 @@ func (e *env) remote(url string) (*remote, bool) {
 		fmt.Fprintf(e.stderr, "faultline: %s is not set\n", config.EnvToken)
 		return nil, false
 	}
-	return &remote{base: strings.TrimRight(url, "/"), token: token, http: &http.Client{Timeout: 30 * time.Second}}, true
+	base := strings.TrimRight(url, "/")
+	u, err := neturl.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		fmt.Fprintf(e.stderr, "faultline: %q is not an http or https URL\n", url)
+		return nil, false
+	}
+	if u.Scheme == "http" && !loopback(u.Hostname()) {
+		fmt.Fprintf(e.stderr, "faultline: warning: sending the API token over plain HTTP to %s; put a TLS terminating proxy in front of the control plane\n", u.Host)
+	}
+	return &remote{base: base, token: token, http: &http.Client{Timeout: 30 * time.Second}}, true
 }
 
 func (r *remote) request(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -250,6 +273,9 @@ func (e *env) cmdReport(args []string) int {
 	if !validFormat(*format) {
 		return e.usageErr("--format must be one of json, md, html, junit")
 	}
+	if !runIDRE.MatchString(pos[0]) {
+		return e.usageErr("%q is not a run id", pos[0])
+	}
 	r, ok := e.remote(*url)
 	if !ok {
 		return exitUsage
@@ -332,6 +358,10 @@ func (e *env) cmdRun(args []string) int {
 		if err != nil {
 			return e.fail(err)
 		}
+		if !runIDRE.MatchString(created.RunID) {
+			// The id goes into URLs and report paths; its shape is never taken on trust.
+			return e.fail(errors.New("the control plane returned a malformed run id"))
+		}
 		fmt.Fprintf(e.stdout, "run %s created\n", created.RunID)
 
 		doc, err := e.follow(ctx, r, created.RunID)
@@ -345,6 +375,9 @@ func (e *env) cmdRun(args []string) int {
 		}
 		if err != nil {
 			return e.fail(err)
+		}
+		if doc.RunID != created.RunID {
+			return e.fail(errors.New("the control plane returned a document for a different run"))
 		}
 		e.summary(doc)
 

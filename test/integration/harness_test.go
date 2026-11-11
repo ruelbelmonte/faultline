@@ -52,14 +52,33 @@ func bin(name string) string {
 	return filepath.Join(binDir, name)
 }
 
+var (
+	handedOutMu sync.Mutex
+	handedOut   = map[string]bool{}
+)
+
+// freeAddr returns a loopback address nothing is listening on. The kernel can
+// offer the same port again once it is closed, so addresses already handed
+// out in this test binary are never returned twice.
 func freeAddr(t testing.TB) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for attempt := 0; attempt < 50; attempt++ {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		ln.Close()
+		handedOutMu.Lock()
+		taken := handedOut[addr]
+		handedOut[addr] = true
+		handedOutMu.Unlock()
+		if !taken {
+			return addr
+		}
 	}
-	defer ln.Close()
-	return ln.Addr().String()
+	t.Fatal("could not find an unused port")
+	return ""
 }
 
 type syncBuffer struct {

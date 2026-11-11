@@ -632,8 +632,10 @@ func (r *Run) recovered(injEnd time.Time) bool {
 func (r *Run) finalize(precheckFailed bool) {
 	cause := r.abortCause()
 	if cause != nil {
-		// Faults are cleared before the aborted status is persisted.
+		// Faults are cleared before the aborted status is persisted, and the
+		// audit entry exists before anyone can observe that status.
 		r.clearProxy()
+		r.c.audit(cause.actor, "run_aborted", r.id, map[string]any{"reason": cause.reason})
 	}
 	r.mu.Lock()
 	injected := !r.injStart.IsZero()
@@ -673,9 +675,6 @@ func (r *Run) finalize(precheckFailed bool) {
 
 	r.persist()
 	r.c.writeReports(r.id)
-	if cause != nil {
-		r.c.audit(cause.actor, "run_aborted", r.id, map[string]any{"reason": cause.reason})
-	}
 	for _, f := range found {
 		r.publish("finding", f)
 	}

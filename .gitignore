@@ -7,3 +7,4 @@ node_modules/
 *.test
 *.exe
 *.stackdump
+/ui/e2e/.work/
