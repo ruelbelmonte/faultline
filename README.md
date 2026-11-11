@@ -182,6 +182,7 @@ make build              # both binaries into bin/
 make test               # unit tests
 make test-integration   # real processes on free ports
 make test-race          # unit and integration tests with the race detector (needs cgo)
+make test-load          # proxy latency overhead and throughput, with and without an active run
 make test-ui            # Playwright smoke test of the dashboard (needs Node)
 make lint               # go vet, gofmt, staticcheck
 make ui                 # rebuild the dashboard into internal/ui/dist

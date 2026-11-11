@@ -73,7 +73,7 @@ Keep the clocks of the proxy and control hosts in sync (NTP). Fault windows are 
 
 Under `data_dir`, on the control plane's volume:
 
-- `faultline.db`: runs, per-second metrics, audit entries, and the redacted copy of each experiment.
+- `faultline.db`: runs, per-second metrics, audit entries, and the redacted copy of each experiment. While a run is active it also holds timing rows for that run's proxied requests (no method, path or status, and a salted hash instead of the correlation id); they are deleted when the run ends.
 - `audit.jsonl`: the audit log, append-only from the application's side. It is a plain file; protect it with file permissions and ship it to your log store if you need it to be tamper-evident.
 - `reports/{run_id}/`: the four report files.
 

@@ -130,3 +130,32 @@ func TestGarbleSplitAcrossChunksMatchesWhole(t *testing.T) {
 		t.Fatal("corruption must not depend on how the body is chunked")
 	}
 }
+
+func TestRingReportsOverwritingUnreadRecords(t *testing.T) {
+	r := newRing(4)
+	for i := 0; i < 4; i++ {
+		if r.add("a", fault.Record{}) {
+			t.Fatalf("record %d: nothing can be lost before the ring is full", i+1)
+		}
+	}
+	r.since("a", 0)
+	for i := 0; i < 4; i++ {
+		if r.add("a", fault.Record{}) {
+			t.Fatalf("overwriting record %d, which was read, must not count as a loss", i+1)
+		}
+	}
+	if !r.add("a", fault.Record{}) {
+		t.Fatal("overwriting record 5, which nobody read, must be reported")
+	}
+	r.since("a", 1<<40)
+	if r.add("a", fault.Record{}) {
+		t.Fatal("after a read up to the newest record nothing unread is left to lose")
+	}
+	// Records 10 to 13 now fill the ring; none of them has been read.
+	for i := 0; i < 3; i++ {
+		r.add("a", fault.Record{})
+	}
+	if !r.add("a", fault.Record{}) {
+		t.Fatal("a cursor beyond the newest record must not mark later records as read")
+	}
+}

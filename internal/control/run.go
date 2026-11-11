@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -62,7 +63,7 @@ type Run struct {
 	probeChecks []probeCheck
 	consecOK    map[string]int
 	consecFail  map[string]int
-	records     []fault.Record
+	recordSalt  []byte
 	recordSeq   int64
 	injStart    time.Time
 	injEnd      time.Time
@@ -79,8 +80,9 @@ func newRun(c *Control, exp *experiment.Experiment, rawYAML []byte) *Run {
 		done:    make(chan struct{}),
 		buckets: map[int64]*Bucket{}, nextBucket: now.Unix(),
 		consecOK: map[string]int{}, consecFail: map[string]int{},
-		subs: map[chan sseMsg]struct{}{},
+		subs: map[chan sseMsg]struct{}{}, recordSalt: make([]byte, 16),
 	}
+	rand.Read(r.recordSalt)
 	r.ctx, r.cancel = context.WithCancelCause(context.Background())
 	r.doc = report.Document{
 		SchemaVersion: report.SchemaVersion,
@@ -328,14 +330,15 @@ func (r *Run) collect() {
 			r.c.log.Warn("reading proxy records failed", "run_id", r.id, "error", err.Error())
 			return
 		}
+		var own []fault.Record
 		r.mu.Lock()
 		r.recordSeq = page.Next
 		for _, rec := range page.Records {
-			r.records = append(r.records, rec)
 			if !rec.Scoped && r.exp.Scope != experiment.ScopeAll {
 				// Someone else's traffic on a shared route is not this run's.
 				continue
 			}
+			own = append(own, rec)
 			done := rec.TS.Add(time.Duration(rec.DurationMs * float64(time.Millisecond)))
 			b := r.bucketLocked(max(done.Unix(), r.nextBucket))
 			rm, total := b.Routes[rec.Route], r.doc.Metrics.Proxy[rec.Route]
@@ -348,6 +351,9 @@ func (r *Run) collect() {
 			b.Routes[rec.Route], r.doc.Metrics.Proxy[rec.Route] = rm, total
 		}
 		r.mu.Unlock()
+		if err := r.c.store.SaveRecords(r.id, r.recordSalt, own); err != nil {
+			r.c.log.Error("storing request records failed; findings will lack them", "run_id", r.id, "error", err.Error())
+		}
 		if len(page.Records) < fault.MaxRecordsPage {
 			break
 		}
@@ -654,8 +660,20 @@ func (r *Run) finalize(precheckFailed bool) {
 		r.summariseLocked()
 	}
 	verdict, reason := r.verdictLocked(cause, precheckFailed)
-	r.doc.Findings = findings.Evaluate(r.findingsInputLocked(injected && cause == nil))
-	found := append([]report.Finding{}, r.doc.Findings...)
+	in := r.findingsInputLocked(injected && cause == nil)
+	r.mu.Unlock()
+
+	// Reads the stored records; not under mu, so the API stays responsive.
+	found, err := findings.EvaluateFrom(in, r.c.store.Evidence(r.id))
+	if err != nil {
+		r.c.log.Error("reading request records failed; findings are incomplete", "run_id", r.id, "error", err.Error())
+	}
+	if err := r.c.store.DeleteRecords(r.id); err != nil {
+		r.c.log.Error("deleting request records failed", "run_id", r.id, "error", err.Error())
+	}
+
+	r.mu.Lock()
+	r.doc.Findings = append([]report.Finding{}, found...)
 	r.doc.Verdict = &verdict
 	if reason != "" {
 		r.doc.Reason = &reason
@@ -700,11 +718,6 @@ func (r *Run) findingsInputLocked(completed bool) findings.Input {
 		RecoverySeconds:             r.doc.RecoverySeconds,
 		RecoveryTimeoutS:            r.exp.RecoveryTimeout.Seconds(),
 		ClearedAt:                   r.injEnd,
-	}
-	for _, rec := range r.records {
-		if rec.Scoped || r.exp.Scope == experiment.ScopeAll {
-			in.Records = append(in.Records, rec)
-		}
 	}
 	for i, f := range r.exp.Faults {
 		in.Faults = append(in.Faults, findings.Fault{ID: f.ID, Route: f.Route, Match: f.Match, Triggers: r.doc.Faults[i].Triggers})

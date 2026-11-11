@@ -39,7 +39,8 @@ type Fault struct {
 
 type Input struct {
 	Hypothesis []report.HypothesisEntry
-	// Records are the run's own proxied requests during injection.
+	// Records are the run's own proxied requests during injection. Only
+	// Evaluate reads them; EvaluateFrom takes its Evidence separately.
 	Records                     []fault.Record
 	RetryAmplificationThreshold float64
 	TimeoutFaults               []TimeoutFault
@@ -76,9 +77,18 @@ func end(r fault.Record) time.Time {
 	return r.TS.Add(time.Duration(r.DurationMs * float64(time.Millisecond)))
 }
 
-// Evaluate applies every rule. Findings come out ordered by severity, then by rule.
+// Evaluate applies every rule to records held in memory.
 func Evaluate(in Input) []report.Finding {
+	out, _ := EvaluateFrom(in, FromRecords(in.Records))
+	return out
+}
+
+// EvaluateFrom applies every rule. Findings come out ordered by severity,
+// then by rule. If the evidence cannot be read, the rules that need it are
+// left out and the error is returned with the findings that remain.
+func EvaluateFrom(in Input, ev Evidence) ([]report.Finding, error) {
 	out := []report.Finding{}
+	var evidenceErr error
 
 	for _, h := range in.Hypothesis {
 		if h.Passed {
@@ -97,21 +107,26 @@ func Evaluate(in Input) []report.Finding {
 		})
 	}
 
-	out = append(out, retryFindings(in)...)
+	retries, err := retryFindings(in, ev)
+	if err != nil {
+		evidenceErr = err
+	}
+	out = append(out, retries...)
 
 	for _, tf := range in.TimeoutFaults {
 		var held []float64
-		for _, r := range in.Records {
-			if r.FaultID == nil || *r.FaultID != tf.ID || r.ClientHeldMs == nil {
-				continue
-			}
+		err := ev.Holds(tf.ID, func(h Hold) {
 			// A hold that ended because the faults were cleared says nothing
 			// about the caller's timeout: it neither gave up nor sat it out.
-			cutShort := *r.ClientHeldMs < MissingTimeoutFraction*tf.HoldMs
-			if cutShort && !in.ClearedAt.IsZero() && !end(r).Before(in.ClearedAt.Add(-ClearToleranceMs*time.Millisecond)) {
-				continue
+			cutShort := h.HeldMs < MissingTimeoutFraction*tf.HoldMs
+			if cutShort && !in.ClearedAt.IsZero() && !h.End.Before(in.ClearedAt.Add(-ClearToleranceMs*time.Millisecond)) {
+				return
 			}
-			held = append(held, *r.ClientHeldMs)
+			held = append(held, h.HeldMs)
+		})
+		if err != nil {
+			evidenceErr = err
+			continue
 		}
 		if len(held) == 0 {
 			continue
@@ -164,59 +179,63 @@ func Evaluate(in Input) []report.Finding {
 
 	rank := map[string]int{"high": 0, "medium": 1, "low": 2, "info": 3}
 	sort.SliceStable(out, func(i, j int) bool { return rank[out[i].Severity] < rank[out[j].Severity] })
-	return out
+	return out, evidenceErr
+}
+
+// retryStats is what the retry rules keep per faulted route.
+type retryStats struct {
+	total, maxAttempts, correlations int
+	noBackoffGaps, ignoredGaps       []float64
+	ignoredRetryAfter                int
 }
 
 // retryFindings looks at how callers retried on each faulted route.
-func retryFindings(in Input) []report.Finding {
-	type key struct{ route, correlation string }
-	groups := map[key][]fault.Record{}
-	faulted := map[string]bool{}
-	var routes []string
-	for _, r := range in.Records {
-		if r.FaultID != nil && !faulted[r.Route] {
-			faulted[r.Route] = true
-			routes = append(routes, r.Route)
-		}
-		if r.Correlation != "" {
-			k := key{r.Route, r.Correlation}
-			groups[k] = append(groups[k], r)
-		}
+func retryFindings(in Input, ev Evidence) ([]report.Finding, error) {
+	routes, err := ev.FaultedRoutes()
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(routes)
+	stats := map[string]*retryStats{}
+	for _, route := range routes {
+		stats[route] = &retryStats{ignoredRetryAfter: math.MaxInt}
+	}
+	err = ev.Attempts(func(route string, attempts []Attempt) {
+		s := stats[route]
+		if s == nil {
+			return
+		}
+		s.correlations++
+		s.total += len(attempts)
+		s.maxAttempts = max(s.maxAttempts, len(attempts))
+		for i := 0; i+1 < len(attempts); i++ {
+			prev, next := attempts[i], attempts[i+1]
+			if !prev.Faulted {
+				continue
+			}
+			gap := float64(next.TS.Sub(prev.end()).Microseconds()) / 1000
+			if gap < -OverlapToleranceMs {
+				continue
+			}
+			gap = math.Max(gap, 0)
+			if gap < BackoffMinGapMs {
+				s.noBackoffGaps = append(s.noBackoffGaps, gap)
+			}
+			if prev.RetryAfter != nil && gap < RetryAfterTolerance*float64(*prev.RetryAfter)*1000 {
+				s.ignoredGaps = append(s.ignoredGaps, gap)
+				s.ignoredRetryAfter = min(s.ignoredRetryAfter, *prev.RetryAfter)
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	var out []report.Finding
 	for _, route := range routes {
-		total, maxAttempts, correlations := 0, 0, 0
-		var noBackoffGaps, ignoredGaps []float64
-		ignoredRetryAfter := math.MaxInt
-		for k, recs := range groups {
-			if k.route != route {
-				continue
-			}
-			correlations++
-			total += len(recs)
-			maxAttempts = max(maxAttempts, len(recs))
-			sort.Slice(recs, func(i, j int) bool { return recs[i].TS.Before(recs[j].TS) })
-			for i := 0; i+1 < len(recs); i++ {
-				prev, next := recs[i], recs[i+1]
-				if prev.FaultID == nil {
-					continue
-				}
-				gap := float64(next.TS.Sub(end(prev)).Microseconds()) / 1000
-				if gap < -OverlapToleranceMs {
-					continue
-				}
-				gap = math.Max(gap, 0)
-				if gap < BackoffMinGapMs {
-					noBackoffGaps = append(noBackoffGaps, gap)
-				}
-				if prev.RetryAfter != nil && gap < RetryAfterTolerance*float64(*prev.RetryAfter)*1000 {
-					ignoredGaps = append(ignoredGaps, gap)
-					ignoredRetryAfter = min(ignoredRetryAfter, *prev.RetryAfter)
-				}
-			}
-		}
+		s := stats[route]
+		total, maxAttempts, correlations := s.total, s.maxAttempts, s.correlations
+		noBackoffGaps, ignoredGaps, ignoredRetryAfter := s.noBackoffGaps, s.ignoredGaps, s.ignoredRetryAfter
 
 		if correlations > 0 {
 			mean := float64(total) / float64(correlations)
@@ -256,5 +275,5 @@ func retryFindings(in Input) []report.Finding {
 			})
 		}
 	}
-	return out
+	return out, nil
 }

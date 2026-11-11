@@ -36,13 +36,17 @@ type ring struct {
 	buf   []entry
 	start int
 	seq   int64
+	// read is the highest sequence number a reader has been given.
+	read int64
 }
 
 func newRing(size int) *ring {
 	return &ring{size: size}
 }
 
-func (r *ring) add(runID string, rec fault.Record) {
+// add stores a record. It reports whether doing so overwrote a record that
+// no reader had been given yet.
+func (r *ring) add(runID string, rec fault.Record) (lostUnread bool) {
 	rec.Path = clip(rec.Path, maxRecordPath)
 	rec.Correlation = clip(rec.Correlation, maxRecordCorrelation)
 	rec.Method = clip(rec.Method, maxRecordMethod)
@@ -53,10 +57,12 @@ func (r *ring) add(runID string, rec fault.Record) {
 	e := entry{rec: rec, runID: runID}
 	if len(r.buf) < r.size {
 		r.buf = append(r.buf, e)
-		return
+		return false
 	}
+	lostUnread = r.buf[r.start].rec.Seq > r.read
 	r.buf[r.start] = e
 	r.start = (r.start + 1) % r.size
+	return lostUnread
 }
 
 // since returns records with seq > since for a run (any run when runID is
@@ -74,5 +80,6 @@ func (r *ring) since(runID string, since int64) fault.RecordPage {
 			page.Records = append(page.Records, e.rec)
 		}
 	}
+	r.read = max(r.read, min(page.Next, r.seq))
 	return page
 }
