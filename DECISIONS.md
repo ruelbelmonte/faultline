@@ -145,6 +145,24 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 
 **D91. The demo's OpenAI-compatible mock is `POST /v1/chat/completions` on the existing `llm` server.** Same 400-character text, 20 content chunks of 20 characters 50 ms apart, first chunk flushed at once, `finish_reason: "stop"`, `data: [DONE]`; with a non-empty `tools` array one tool call named after the first tool with arguments `{"query":"demo"}`, streamed in four argument chunks. No new flag or server: the demo's command line and its four servers are a PRD contract, and an extra path on one of them changes none of it.
 
+## MCP tool faults (M8)
+
+The contract is `docs/mcp-faults.md`, written before the code because the PRD gives M8 none. These entries record the choices behind it.
+
+**D92. Four fault types, named `mcp_*`, added next to the existing ones.** `mcp_tool_error`, `mcp_slow_tool`, `mcp_malformed_result`, `mcp_stream_drop`. Alternative: reuse the generic types (`latency`, `error_in_body`, `corrupt_body`) on an MCP route. That needs no code but hits every MCP message, including `initialize` and `tools/list`, cannot echo the JSON-RPC id, and cannot tell a tool result from a notification in a stream. No existing type, key, endpoint or behaviour changed; the experiment schema gained four values for `type`.
+
+**D93. Being a tool call is part of the match, and the proxy reads the request body to find out.** A `tools/call` is one JSON-RPC message among many on the same URL, so route, method and path cannot select it. The proxy reads at most 1 MiB of the body, only when an MCP fault of the active run already matches on everything else, and forwards the bytes unchanged. This is the only place where the proxy reads a request body before forwarding it; PRD 8.1's "request bodies are streamed too" still holds for every other request, and for these the body still reaches the upstream byte for byte. Alternatives: match on a header (MCP has none that names the method) or fault every POST to the endpoint (wrong, see D92). A request that is not a tool call does not count for the fault's strategy and falls through to the next fault, which is how every other part of a match behaves; D17's "no fall-through" is about a matching fault whose strategy does not fire, and still applies.
+
+**D94. `mcp_tool_error` answers with `application/json`, never a stream, and does not call the server.** Streamable HTTP lets a server answer a POST either way and requires clients to accept both. `kind: tool` is the error an agent is meant to see and recover from (`isError: true`); `kind: protocol` is a JSON-RPC error, default code `-32603`.
+
+**D95. `mcp_stream_drop` never lets the response to the call through.** It closes after `after_events` events or when the response event arrives, whichever is first; without the second condition a short stream would deliver its result and the fault would have counted as triggered while doing nothing. A JSON response is dropped whole (status and headers, then an abrupt close). The close is a FIN with the response left unterminated, like every other cut (D18), and the record status is 0 (D19).
+
+**D96. `mcp_malformed_result` replaces the whole response message, in two modes.** `invalid_json` gives text that cannot be parsed; `schema` gives valid JSON-RPC whose `result.content` is a string instead of an array. A JSON-RPC error answering the call is replaced too: it is the response to the call. In a stream only the `data:` of that one event changes.
+
+**D97. The demo MCP server is `/mcp` on the existing `llm` server, stateless, with two tools.** `lookup_stock` answers with JSON and `slow_report` with an event stream, so both response forms of Streamable HTTP can be tested. No flag and no fifth server: the demo's command line and its four servers are a PRD contract (same reasoning as D91). It implements protocol revision 2025-06-18 by hand with the standard library; it is a test fixture, not a general MCP server, and was not checked against a third-party MCP client.
+
+**D98. Not covered by M8:** JSON-RPC batches, the client's `GET` stream, the stdio and legacy HTTP+SSE transports, MCP methods other than `tools/call` (resources, prompts, sampling), and session faults such as an expired `Mcp-Session-Id`.
+
 ## Findings and reports
 
 **D51. Retry rules judge each faulted route separately and group by correlation id.** A route is "faulted" when at least one of the run's requests on it was faulted. `retry_amplification` averages over every correlation seen on that route. A request without a correlation id cannot be attributed and is ignored by the retry rules.

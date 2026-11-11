@@ -29,6 +29,7 @@ func (a *app) llm() http.Handler {
 	mux := http.NewServeMux()
 	health(mux)
 	mux.HandleFunc("POST /v1/chat/completions", chatCompletions)
+	mux.HandleFunc("/mcp", mcp)
 	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
 		var req llmRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {

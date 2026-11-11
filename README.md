@@ -50,7 +50,7 @@ echo "exit code: $?"
 What this does:
 
 1. `faultline init` writes `faultline.yaml`, `experiments/example.yaml` and a `.gitignore` entry for the data directory.
-2. `faultline-demo` starts a small demo system: shop (9000) calls inventory (9001) calls pricing (9002), each through the proxy, plus an LLM mock (9003).
+2. `faultline-demo` starts a small demo system: shop (9000) calls inventory (9001) calls pricing (9002), each through the proxy, plus an LLM mock (9003) that speaks the Anthropic Messages API and OpenAI chat completions and hosts a small MCP server at `/mcp`.
 3. `faultline up` starts the proxy and the control plane as two child processes.
 4. `faultline run` runs the example: 30% of inventory calls return 503. The demo shop retries, so orders keep working. The verdict is `passed` and the exit code is 0.
 
@@ -114,7 +114,7 @@ If a hop drops the header, faults behind that hop never trigger. The run then en
 - [docs/qa-deployment.md](docs/qa-deployment.md): running proxy and control in a shared QA environment.
 - [examples/terraform-snippet.md](examples/terraform-snippet.md): pointing an upstream URL at the proxy from infrastructure code.
 
-Fault types: `latency`, `http_error`, `error_in_body`, `timeout`, `reset`, `slow_body`, `corrupt_body`, and for LLM APIs (Anthropic Messages and OpenAI chat completions) `llm_rate_limit`, `llm_overloaded`, `llm_stream_cut`, `llm_slow_first_token`, `llm_truncate`, `llm_malformed_tool_call`.
+Fault types: `latency`, `http_error`, `error_in_body`, `timeout`, `reset`, `slow_body`, `corrupt_body`, and for LLM APIs (Anthropic Messages and OpenAI chat completions) `llm_rate_limit`, `llm_overloaded`, `llm_stream_cut`, `llm_slow_first_token`, `llm_truncate`, `llm_malformed_tool_call`. For MCP tool calls over Streamable HTTP there are `mcp_tool_error`, `mcp_slow_tool`, `mcp_malformed_result` and `mcp_stream_drop`; their contract is [docs/mcp-faults.md](docs/mcp-faults.md).
 
 ## CLI
 
@@ -168,7 +168,7 @@ Across several files the worst result wins: 12, then 10, then 11, then 0. `--rep
 
 ## Security and data handling
 
-- Bodies are never stored. The proxy records method, path (without query string), status, timing, the correlation id and whether a fault applied. It does not record header values.
+- Bodies are never stored. The proxy looks inside a request body in one case only: to tell whether a request is an MCP tool call, when an MCP fault of the active run otherwise matches it (at most 1 MiB, in memory, forwarded unchanged). The proxy records method, path (without query string), status, timing, the correlation id and whether a fault applied. It does not record header values.
 - Values of headers listed in `redaction.headers` are replaced with `[REDACTED]` wherever they could be stored or shown, including inside a saved experiment. The driver keeps the real value in memory only.
 - Tokens are compared in constant time and are never logged.
 - All listeners bind to `127.0.0.1` by default. To expose them in QA, see [docs/qa-deployment.md](docs/qa-deployment.md): restrict the network, terminate TLS in front of the control plane, and keep the proxy admin port private.

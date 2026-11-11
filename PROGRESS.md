@@ -1,5 +1,7 @@
 # Progress
 
+The sections M0 to M7 are the record of the first build and are left as written; where a "known gap" there has since been closed, the continuation sections ("Work item 1" to "Work item 7") and the final report say so, and they are the current state.
+
 Gate results per milestone. Counts are `--- PASS` / `--- FAIL` / `--- SKIP` lines from `go test -v` (subtests included).
 
 Host: Windows 11, Go 1.27.4 (portable, `.tools/`). Race gates: `golang:1.27` Linux container (see DECISIONS D3).
@@ -203,7 +205,7 @@ Known gaps:
 
 ## M8: MCP tool faults (stretch)
 
-**Not attempted.** M0 to M7 are green, so the precondition holds, but the PRD gives M8 no contract: section 2 points to section 13 for it, and section 13 describes only the demo. Building it would have meant inventing fault types, parameters and a demo MCP server with nothing to check them against. What it would take is listed under "What I would do next".
+Not attempted in the first build, because the PRD gives it no contract. Built in the continuation: see "Work item 7" below.
 
 ## Continuation baseline (2026-11-12)
 
@@ -381,6 +383,49 @@ Known gaps:
 - Only chat completions. The OpenAI Responses API and legacy completions are not covered and get the Messages API behaviour, which for the two rewriting faults means "left untouched".
 - Tested against the demo mock only, as the brief requires: no real OpenAI endpoint was called. Shapes follow OpenAI's published format, including error objects; an OpenAI-compatible server that deviates from it may not be recognised by `llm_truncate` or `llm_malformed_tool_call`, which then relay the response unchanged.
 - Streaming `llm_truncate` with several choices ends the stream at the first choice to reach the limit (D90), and no `usage` chunk is synthesised.
+
+## Work item 7: M8, MCP tool faults
+
+Precondition: work items 1 to 4 green (they are; item 5 is open for lack of a remote, item 6 green).
+
+Contract first: `docs/mcp-faults.md`, written before any code. It specifies the four fault types, their parameters and validation rules, what makes a request an MCP tool call, and the MCP server in `faultline-demo`. Choices behind it: DECISIONS D92 to D98. No existing contract changed.
+
+Built to that contract:
+
+- `internal/fault`: `mcp_tool_error`, `mcp_slow_tool`, `mcp_malformed_result`, `mcp_stream_drop`, with parameter validation shared by the CLI, the control API and the proxy admin API.
+- `internal/proxy/mcp.go` and `Engine.DecideCall`: being a `tools/call` (optionally for a named tool) is part of an MCP fault's match; the request body is read (at most 1 MiB, forwarded unchanged) only when an MCP fault matches on everything else.
+- `internal/demo/mcp.go`: a stateless MCP server over Streamable HTTP at `/mcp` on the demo's `llm` server, with a tool that answers in JSON (`lookup_stock`) and one that answers with an event stream (`slow_report`).
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags "integration load" ./test/...`, `gofmt -l cmd internal test` | Windows | clean |
+| `go test ./... -count=1` | Windows | 155 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 95 top-level tests pass, 0 fail, 0 skip (244s) |
+| `npx playwright test` in `ui/` | Windows, 3 browsers | 42 pass |
+| `sh .tools/race.sh "make lint && make test-race"` | Linux container | first run: 1 unit test failed (below); after the fix: lint clean, unit and integration ok with `-race` (271s) |
+| compose example | Docker Desktop | passed, failed, failed, passed; exit 10 |
+| acceptance suite | Windows | 56 passed, 0 failed, 0 skipped |
+
+The Linux failure was in a new unit test, `TestDecideCallMatchesToolCallsOnly`, not in the product: the test took its "now" before installing the faults, and a fault starts at the moment it is installed, so on Linux's finer clock the request was a few microseconds too early to match. On Windows the two readings of the clock were equal. The test now takes its timestamp after the install; no assertion changed.
+
+Gate, same standard as M4 (demo, proxy and control as real processes):
+
+- each fault type against the demo MCP server, for the JSON tool and the stream tool: `TestMCPToolError`, `TestMCPSlowTool`, `TestMCPMalformedResult`, `TestMCPStreamDrop`;
+- every parameter and default, and every validation rule: the tests above, `TestMCPFaultParams` (unit, 11 valid and 22 invalid cases), `TestMCPAdminValidation`;
+- matching: `TestMCPMatching` (only tool calls are touched: `initialize`, `tools/list`, notifications, batches, non-JSON and oversized bodies pass; the tool filter; the strategy counts tool calls only; fall-through to a later fault; scoping; `expose_fault_header` off; the request body reaches the server unchanged) and unit `TestDecideCallMatchesToolCallsOnly`, `TestReadToolCall`;
+- streams stay unbuffered through `mcp_malformed_result`; a pending `mcp_slow_tool` delay is released when the faults are cleared;
+- installed by a real run: `TestMCPFaultsThroughControl` (passed, failed and inconclusive verdicts, and validation through the control API);
+- the demo server against its own table in the contract: `TestDemoMCPServer`.
+
+**Green.**
+
+Known gaps:
+
+- Tested against the demo MCP server only. No third-party MCP client or server (an SDK, a real agent) was put through the proxy, so interoperability beyond the shapes in the specification is unverified.
+- Out of scope by contract (D98): JSON-RPC batches, the client's `GET` stream, stdio and legacy HTTP+SSE transports, MCP methods other than `tools/call`, session faults.
+- The contract is mine. The PRD names the milestone and nothing else, so there is nothing external it was checked against; the acceptance suite does not cover M8.
+- No example experiment for MCP was added under `examples/experiments/`, because that directory's documented results (four verdicts, exit code 10) are part of the README and the compose check. The example is in `docs/mcp-faults.md`.
+- The dashboard needed no change (fault types are shown as reported), and no UI test exercises an MCP fault.
 
 ---
 
