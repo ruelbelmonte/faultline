@@ -356,11 +356,29 @@ Known gaps:
 
 ## Work item 5: CI and macOS
 
-**Open.** `git remote -v` prints nothing: the repository has no remote named `origin`, and the instruction for that case is not to create one. Nothing was pushed, `.github/workflows/ci.yaml` has still never run, and macOS is still untested.
+**Closed on 2026-11-12, after the final report was first written.** When the work items were done the repository had no remote, so this item was left open. The owner then asked for it to be pushed.
 
-What was done towards it without a remote: the workflow was updated for the three-browser UI gate (work item 4), and every job's commands were run by hand in the closest local equivalent, which is recorded in the other sections: lint, unit, cross-compile, race and integration in a `golang:1.27` Linux container; integration natively on Windows; the UI job in the official Playwright Linux image (42 pass); the docker job's image build and compose run through Docker Desktop. None of that covers the `macos-latest` integration job or GitHub's runners themselves.
+What was done:
 
-To close it: add a remote named `origin`, push `master`, and let the workflow run; whatever fails there, in particular in the macOS job, is the remaining work.
+- Private repository `ruelbelmonte/faultline` created, remote `origin` added.
+- A machine-wide pre-push hook refuses direct pushes to `master`. It was not bypassed. `master` was created on GitHub at the first build's last commit (`2b7d542`), and the continuation was pushed as `feature/close-final-report-items` and opened as pull request #1, which is what triggers the workflow.
+- First run of `.github/workflows/ci.yaml` (run 43119795842, on commit `a5b61d9`): **all seven jobs passed, with no change needed.**
+
+| Job | Result |
+|---|---|
+| `lint-and-unit` (vet, gofmt, staticcheck, unit tests, cross-compile) | pass |
+| `race` (unit and integration with `-race`) | pass |
+| `integration (ubuntu-latest)` | pass |
+| `integration (macos-latest)` | pass |
+| `integration (windows-latest)` | pass |
+| `ui` (dashboard build equals the committed one; Playwright smoke and axe audit in Chromium, Firefox, WebKit) | pass |
+| `docker` (both images, compose example) | pass |
+
+Known gaps:
+
+- macOS is covered by the integration job only (real processes on `macos-latest`). The unit, race, UI and docker jobs run on Linux, and nobody has used the dashboard or the README quickstart on a Mac by hand.
+- One run. A timing-sensitive test that passes once on a hosted runner can still flake later.
+- The pull request is open, not merged; merging is the owner's call.
 
 ## Work item 6: OpenAI format for LLM faults (PRD 8.5 stretch)
 
@@ -386,7 +404,7 @@ Known gaps:
 
 ## Work item 7: M8, MCP tool faults
 
-Precondition: work items 1 to 4 green (they are; item 5 is open for lack of a remote, item 6 green).
+Precondition: work items 1 to 4 green (they are; item 5 was still open at that point for lack of a remote, item 6 green).
 
 Contract first: `docs/mcp-faults.md`, written before any code. It specifies the four fault types, their parameters and validation rules, what makes a request an MCP tool call, and the MCP server in `faultline-demo`. Choices behind it: DECISIONS D92 to D98. No existing contract changed.
 
@@ -433,11 +451,11 @@ Known gaps:
 
 Rewritten on 2026-11-12 after the continuation work (work items 1 to 7). It replaces the report written at the end of the first build.
 
-**In one paragraph.** Six of the seven work items are closed with green gates: the acceptance suite passes 56 of 56, request headers are forwarded byte for byte, run records no longer have to fit in memory and the proxy has load numbers, the UI gate runs in three browsers with an accessibility audit, the LLM faults speak OpenAI chat completions, and M8 (MCP tool faults) is built to a written contract. **One item is open: CI and macOS.** The repository has no remote, so the GitHub Actions workflow has never run and nothing has ever run on macOS.
+**In one paragraph.** All seven work items are closed with green gates: the acceptance suite passes 56 of 56, request headers are forwarded byte for byte, run records no longer have to fit in memory and the proxy has load numbers, the UI gate runs in three browsers with an accessibility audit, the LLM faults speak OpenAI chat completions, M8 (MCP tool faults) is built to a written contract, and the CI workflow is green on GitHub on its first run, including the macOS integration job. What is left is listed under "Not met, or only partly" and "What is left".
 
 ## Final verification
 
-From a fresh `git clone` of commit `d773cdd` (`M8: MCP tool faults`), on 2026-11-12. The only commit after it is this report, which changes `PROGRESS.md` alone:
+From a fresh `git clone` of commit `d773cdd` (`M8: MCP tool faults`), on 2026-11-12. The commits after it change `PROGRESS.md` alone. The same commit range then passed the CI workflow on GitHub (work item 5):
 
 | Check | Linux (`golang:1.27` container) | Windows 11 |
 |---|---|---|
@@ -459,7 +477,7 @@ From a fresh `git clone` of commit `d773cdd` (`M8: MCP tool faults`), on 2026-11
 |---|---|
 | Acceptance suite green, or every remaining failure explained as a PRD conflict | **Met.** 56 passed, 0 failed, 0 skipped, on the first run and after every later work item. No failure had to be explained. Run on Windows only. |
 | All gates green from a fresh clone on Linux (with `-race`) and Windows | **Met**, table above. |
-| macOS green in CI if a remote exists | **Not applicable yet, and open.** There is no remote. |
+| macOS green in CI if a remote exists | **Met.** `integration (macos-latest)` passed in the first CI run, with the six other jobs (work item 5). |
 | `make build test test-integration lint` succeed | **Met**, in a Linux container. `make` does not exist on the Windows machine. |
 | Compose example and README quickstart still work verbatim | **Met.** Compose gives passed, failed, failed, passed and exit code 10, as the README documents (D73). The quickstart was run in Git Bash on Windows, not on Linux or macOS. |
 | README and docs cover everything added | **Met.** Header fidelity and record storage in `docs/architecture.md` and `docs/qa-deployment.md`; OpenAI format and MCP in `docs/faults.md`; the MCP contract in `docs/mcp-faults.md`; new make targets and limits in `README.md`. |
@@ -473,7 +491,7 @@ From a fresh `git clone` of commit `d773cdd` (`M8: MCP tool faults`), on 2026-11
 | 2 | Header fidelity (PRD 8.1) | Closed for requests, which is what 8.1 states; see "partly met" for the edges | Raw-socket integration tests, D80 |
 | 3 | Limits and load | Closed | Records on disk (D82), ring warning (D83), load test and numbers (D84, work item 3 section) |
 | 4 | UI verification | Closed | 42 Playwright tests in three browsers, axe on every page, zero violations (D85 to D87) |
-| 5 | CI and macOS | **Open** | No remote named `origin` |
+| 5 | CI and macOS | Closed | Pull request #1, CI run 43119795842: seven jobs pass, macOS included |
 | 6 | OpenAI format for LLM faults | Closed | D88 to D91, `TestChat*` |
 | 7 | M8, MCP tool faults | Closed against its own contract | `docs/mcp-faults.md`, D92 to D98, `TestMCP*` |
 
@@ -502,7 +520,7 @@ Each has at least one test that would fail if it broke, named in the milestone a
 
 ## Not met, or only partly
 
-- **CI workflow and macOS (4, 14 M7, 15).** `.github/workflows/ci.yaml` has never run on GitHub. The code cross-compiles for darwin and has no platform-specific code beyond the Unix shell helper, but no test has ever run on macOS. Every other job's commands were run locally in the closest equivalent; that is not the same as a green workflow.
+- **macOS beyond the integration job (4, 15).** The integration tests pass on `macos-latest` in CI. Nothing else has run on macOS: not the unit or race jobs, not the UI tests, not the quickstart by hand.
 - **Header fidelity edges (8.1).** Names and order are exact. Normalised: whitespace around values, line endings, and the chunk boundaries of a chunked request body. Fallback to Go's canonical, sorted names: a request with an obsolete folded header (and the rest of that connection), and an `https` upstream reached through `HTTPS_PROXY`. **Response** header names are still canonicalised and sorted on the way back; 8.1 does not ask for them, and it is not done. `https` upstreams are now always HTTP/1.1.
 - **Long runs (work item 3).** Request records are on disk, which removed the largest term. Memory still grows by about 50 bytes per driver request and 8 bytes per retry gap. The proxy's ring is still 200,000 records and not configurable; if it ever overflows, the only signal is a warning in the proxy log, not something in the report.
 - **Load numbers.** One machine, one run per row, client and server sharing cores. An order of magnitude (about 0.25 to 0.4 ms added per request, 16,000 to 24,000 requests per second through one proxy), not a capacity figure. No test with large bodies, streams or TLS upstreams under load.
@@ -532,7 +550,7 @@ Other things worth knowing:
 - Timing assertions have margins that held on this machine and in the container on every run. On a much slower or heavily loaded machine they could fail without a product defect. One did surface in the other direction during M8: a unit test that passed on Windows' coarse clock and failed on Linux, which was a mistake in the test.
 - Fault windows are absolute times. Proxy and control on hosts with skewed clocks would start and stop faults early or late.
 - On Windows a graceful stop of `proxy` or `control` is only possible through `faultline up` or Ctrl+C in a console; a kill from another program is a hard kill and the lease then does the cleanup.
-- The module path is still `faultline` (D1). It should be renamed when the repository gets a home, which is the same moment work item 5 can be closed.
+- The module path is still `faultline` (D1). The repository now has a home (`github.com/ruelbelmonte/faultline`); renaming the module to match is one search and replace and was not done, because nobody asked for it and it touches every file.
 
 ## Defects found along the way
 
@@ -542,7 +560,7 @@ From the continuation: the proxy forwarded a `Cache-Control: no-cache` header th
 
 ## What is left
 
-1. **The one thing that needs you:** add a git remote named `origin` and push `master`. The CI workflow then runs for the first time, including the macOS job. Whatever fails there is the remaining work of item 5.
+1. **The one thing that needs you:** review and merge pull request #1. `master` on GitHub is still the first build (`2b7d542`); everything in this report is on the branch.
 2. Response header fidelity, if exact response names matter to a system under test: the request mechanism mirrored (D80).
 3. A real MCP client and a real OpenAI-compatible server through the proxy, to check the two stretch features against something I did not write.
 4. A load test on separate machines, with streams and large bodies, repeated enough to give intervals.
