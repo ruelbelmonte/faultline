@@ -360,6 +360,28 @@ What was done towards it without a remote: the workflow was updated for the thre
 
 To close it: add a remote named `origin`, push `master`, and let the workflow run; whatever fails there, in particular in the macOS job, is the remaining work.
 
+## Work item 6: OpenAI format for LLM faults (PRD 8.5 stretch)
+
+Built: `internal/proxy/llm_openai.go` (all six LLM fault types in OpenAI chat completions format, stream and non-stream, selected by a request path ending in `/chat/completions`), `internal/demo/openai.go` (OpenAI-compatible mock at `POST /v1/chat/completions` on the demo's `llm` server: text, stream, tool calls). Decisions D88 to D91; user documentation in `docs/faults.md`.
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags "integration load" ./test/...`, `gofmt -l cmd internal test` | Windows | clean |
+| `go test ./... -count=1` | Windows | 148 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 87 top-level tests pass, 0 fail, 0 skip (229s) |
+| `npx playwright test` in `ui/` | Windows, 3 browsers | 42 pass |
+| `sh .tools/race.sh "make lint && make test-race"` | Linux container | lint clean; unit and integration ok with `-race` (260s) |
+| compose example | Docker Desktop | passed, failed, failed, passed; exit 10 |
+| acceptance suite | Windows | 56 passed, 0 failed, 0 skipped |
+
+Gate, against the demo's OpenAI mock through a real proxy, stream and non-stream for each fault type: `TestChatRateLimit`, `TestChatOverloaded`, `TestChatStreamCut`, `TestChatSlowFirstToken`, `TestChatTruncate`, `TestChatMalformedToolCall`; `TestLLMFaultFormatFollowsThePath` (one fault, both APIs on one route, each answered in its own format); `TestChatFaultsThroughControl` (installed by a real run); `TestDemoChatCompletions` (the mock's shapes and stream timing). Unit tests for path detection, per-choice truncation, stream boundaries with several choices, and tool-call corruption. **Green.**
+
+Known gaps:
+
+- Only chat completions. The OpenAI Responses API and legacy completions are not covered and get the Messages API behaviour, which for the two rewriting faults means "left untouched".
+- Tested against the demo mock only, as the brief requires: no real OpenAI endpoint was called. Shapes follow OpenAI's published format, including error objects; an OpenAI-compatible server that deviates from it may not be recognised by `llm_truncate` or `llm_malformed_tool_call`, which then relay the response unchanged.
+- Streaming `llm_truncate` with several choices ends the stream at the first choice to reach the limit (D90), and no `usage` chunk is synthesised.
+
 ---
 
 # Final report

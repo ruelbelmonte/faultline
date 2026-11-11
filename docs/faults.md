@@ -57,9 +57,9 @@ Each fault counts its matching requests: k = 1, 2, 3, ...
 | `slow_body` | `bytes_per_sec` | Forwards the upstream response, throttled to that rate. |
 | `corrupt_body` | `mode: truncate` with `at_bytes`, or `mode: garble` | truncate: forwards exactly `at_bytes` body bytes, then closes abruptly. A body shorter than `at_bytes` is left whole. garble: forwards the full length with every seventh byte flipped, reproducibly for a given seed. |
 
-## LLM faults (Anthropic Messages API)
+## LLM faults
 
-These are meant for a route whose upstream speaks the Messages API (`POST /v1/messages`), streaming or not.
+These are meant for a route whose upstream speaks the Anthropic Messages API (`POST /v1/messages`) or OpenAI chat completions, streaming or not. The table describes the Messages API format; the chat completions format follows it.
 
 | type | params | Behaviour |
 |---|---|---|
@@ -69,6 +69,21 @@ These are meant for a route whose upstream speaks the Messages API (`POST /v1/me
 | `llm_slow_first_token` | `delay_ms` | Forwards status and headers at once, then waits before the first body byte. |
 | `llm_truncate` | `max_chars` (default 50) | Non-streaming: text content is cut to `max_chars` characters and `stop_reason` becomes `max_tokens`. Streaming: text deltas are forwarded until `max_chars` in total, then well-formed `content_block_stop`, `message_delta` (`stop_reason: max_tokens`) and `message_stop` events end the stream. A response already within the limit is not altered. |
 | `llm_malformed_tool_call` | none | Non-streaming: each `tool_use` block's `input` becomes the string `{"query": "de`. Streaming: the `input_json_delta` values of each tool call no longer concatenate to valid JSON. Responses without a tool call are not altered. |
+
+### OpenAI chat completions format
+
+The same six fault types answer in OpenAI format when the request path ends in `/chat/completions` (after the route prefix, so `/v1/chat/completions` and Azure-style deployment paths both qualify). Every other path gets the Messages API behaviour above. There is nothing to configure: one fault on one route serves both APIs, each in its own format.
+
+| type | Behaviour on a chat completions request |
+|---|---|
+| `llm_rate_limit` | 429 with a `retry-after` header and body `{"error":{"message":"faultline injected","type":"rate_limit_error","param":null,"code":"rate_limit_exceeded"}}`. |
+| `llm_overloaded` | 503 (OpenAI has no 529) with body `{"error":{"message":"faultline injected","type":"server_error","param":null,"code":"service_unavailable"}}`. |
+| `llm_stream_cut` | As above: exactly `after_bytes` bytes, then an abrupt close. No `data: [DONE]` reaches the client. |
+| `llm_slow_first_token` | As above. |
+| `llm_truncate` | Non-streaming: each choice's `message.content` longer than `max_chars` is cut to it and that choice's `finish_reason` becomes `length`. Streaming: content deltas are forwarded until a choice has carried `max_chars` characters; then every choice still open gets a chunk with an empty delta and `finish_reason: "length"`, `data: [DONE]` follows and the stream ends. A response within the limit is not altered. |
+| `llm_malformed_tool_call` | Non-streaming: the `function.arguments` of every tool call becomes `{"query": "de`. Streaming: per tool call, the first chunk that carries `arguments` gets `{"query": "de` and the later ones an empty string, so the concatenation is not valid JSON. Responses without tool calls are not altered. |
+
+Records and `X-Faultline-Fault` behave the same in both formats; the record `status` for `llm_overloaded` is 503 here and 529 for the Messages API.
 
 `llm_truncate` and `llm_malformed_tool_call` rewrite only a 200 response that is `text/event-stream` or JSON. Upstream errors and compressed bodies are passed through as they are; the proxy asks the upstream for an uncompressed body for these two faults.
 

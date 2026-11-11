@@ -114,7 +114,7 @@ If a hop drops the header, faults behind that hop never trigger. The run then en
 - [docs/qa-deployment.md](docs/qa-deployment.md): running proxy and control in a shared QA environment.
 - [examples/terraform-snippet.md](examples/terraform-snippet.md): pointing an upstream URL at the proxy from infrastructure code.
 
-Fault types: `latency`, `http_error`, `error_in_body`, `timeout`, `reset`, `slow_body`, `corrupt_body`, and for the Anthropic Messages API `llm_rate_limit`, `llm_overloaded`, `llm_stream_cut`, `llm_slow_first_token`, `llm_truncate`, `llm_malformed_tool_call`.
+Fault types: `latency`, `http_error`, `error_in_body`, `timeout`, `reset`, `slow_body`, `corrupt_body`, and for LLM APIs (Anthropic Messages and OpenAI chat completions) `llm_rate_limit`, `llm_overloaded`, `llm_stream_cut`, `llm_slow_first_token`, `llm_truncate`, `llm_malformed_tool_call`.
 
 ## CLI
 
@@ -194,7 +194,7 @@ The dashboard's built assets are committed under `internal/ui/dist`, so building
 ## Limitations
 
 - Reverse-proxy mode only. No transparent HTTPS interception, no protocol upgrades (WebSocket), no `CONNECT`.
-- LLM faults understand the Anthropic Messages API. OpenAI format is not implemented.
+- LLM faults understand the Anthropic Messages API and OpenAI chat completions (`/chat/completions`). Other OpenAI endpoints, such as the Responses API, are not covered.
 - One run at a time per control plane. No user accounts, RBAC or SSO: one token for the control API, one for the proxy admin API.
 - Proxy and control compare absolute times, so their clocks need to be in sync (NTP is enough).
 - An experiment that needs a sensitive header value cannot be run from the dashboard editor; run it from its file.
