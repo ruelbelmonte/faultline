@@ -200,3 +200,114 @@ Known gaps:
 - **macOS is untested.** The code cross-compiles for darwin and has no platform-specific code beyond the Unix shell helper, but no test has run there.
 - `make` targets were run in a Linux container. `make` is not installed on the Windows build machine, where the equivalent `go` commands were used.
 - The README quickstart was run in Git Bash on Windows. It was not run on Linux or macOS, though each command in it has been run on Linux inside containers.
+
+## M8: MCP tool faults (stretch)
+
+**Not attempted.** M0 to M7 are green, so the precondition holds, but the PRD gives M8 no contract: section 2 points to section 13 for it, and section 13 describes only the demo. Building it would have meant inventing fault types, parameters and a demo MCP server with nothing to check them against. What it would take is listed under "What I would do next".
+
+---
+
+# Final report
+
+State at commit time: gates M0 to M7 green from a fresh `git clone`, on Linux (`golang:1.27` container, including `-race`) and on Windows 11.
+
+| Final check, from a fresh clone | Linux | Windows |
+|---|---|---|
+| `go vet`, `gofmt`, `staticcheck` | clean (`make lint`) | vet and gofmt clean |
+| Unit tests | ok, also with `-race` | 133 pass, 0 fail, 0 skip |
+| Integration tests (real processes) | ok with `-race`, binaries built with `-race`, 237s | 76 top-level tests pass, 0 fail, 0 skip |
+| `make build` | ok | not run (`make` not installed); `go build` ok |
+| UI build equals committed `internal/ui/dist` | identical hashes | no diff |
+| Playwright smoke test | not run | 7 pass |
+| Docker images, compose example | built and run through Docker Desktop (Linux containers) | CLI run from Windows against it |
+
+After that clone-based run, one Unix-only test was added (`TestDemoGracefulShutdownOnSignal`) and run on Linux together with the other signal tests: 4 pass.
+
+## Definition of done
+
+| Item | Status |
+|---|---|
+| Gates M0 to M7 green from a clean checkout | Met on Linux and Windows. Not run on macOS. |
+| `make build test test-integration lint` succeed | Met, in a Linux container. |
+| `examples/docker-compose.yaml` brings up demo + proxy + control, and `faultline run examples/experiments/ --fail-on-breach` completes with the documented results | Met. The documented result is exit code 10: two experiments pass and two fail by design (D73). |
+| README quickstart works verbatim for a new user | Met in Git Bash on Windows. Not run on Linux or macOS. |
+| `PROGRESS.md` final report is complete and honest | This section. |
+
+## PRD requirements believed met
+
+Each has at least one test that would fail if it broke, named in the milestone sections above.
+
+- **4 Technology.** Go, single module, two binaries, `faultline-demo` not imported by `faultline`. SQLite through `modernc.org/sqlite`, no cgo. Vue 3 + TypeScript + Vite, uPlot, embedded with `go:embed`, no Node at run time. Two third-party Go modules, both justified. Multi-stage Dockerfiles on distroless. Cross-compiles for linux, darwin and windows on amd64 and arm64.
+- **5 Architecture.** Proxy and control are separate processes; `up` only spawns them, generates tokens when absent, prints URLs and tokens, forwards signals and stops both.
+- **6 Configuration.** Every key, defaults, unknown keys rejected, production guard (exit 2), token rules (exit 2), tokens never in the file.
+- **7 Experiment schema.** Every key and every validation rule, errors as `{path, message}`.
+- **8.1 Routing.** Path, query and body preserved, `Host` rewritten, unknown route contract, unbuffered response and request streaming with a time-to-first-byte test.
+- **8.2, 8.3 Scoping, matching, strategies.** Including other run ids, seeded probability, per-fault counters of matching requests, `X-Faultline-Fault`.
+- **8.4, 8.5 All 13 fault types**, stream and non-stream for the LLM ones.
+- **8.6 Leases.** `end_at` enforced by the proxy, lease expiry clears everything, kill within 1s, held connections released.
+- **8.7, 8.8 Records and admin API.** Record fields, bounded ring, paging at 5000, no header values or bodies, 401 without a token.
+- **9.1 Run lifecycle.** All statuses; one run at a time (409); precheck failure installs no faults; every listed abort path, including control killed with SIGKILL and faults cleared by lease.
+- **9.2, 9.3 Driver and metrics.** Round-robin, rps, concurrency, scope and correlation headers, one-second buckets persisted per run.
+- **9.4 Verdict rules**, in order.
+- **9.5 Findings.** All seven rules with evidence; thresholds in one file.
+- **9.6 Auth, audit, guards, redaction.** Constant-time compare; the five audit actions; a secret sent in `Authorization` is absent from `data_dir`, every API response, every report and the logs.
+- **9.7 Control API.** Every endpoint, status code and field in the table.
+- **10 Reports.** Canonical JSON with exactly the schema's fields; Markdown; self-contained HTML with inline SVG and no external reference; JUnit that parses; files under `{data_dir}/reports/{run_id}/`.
+- **11 CLI.** Every command and flag; exit codes 0, 10, 11, 12, 2, 1; worst-of across files.
+- **12 Web UI.** Token gate with `sessionStorage` and clear on 401; kill switch with confirmation; active run indicator; environment badge; runs list; run detail with live timeline; experiments editor with debounced validation; audit log; all nine `data-testid` values.
+- **13 Demo.** Four servers, health endpoints, both resilience modes, LLM mock (text, stream, tools), header forwarding.
+- **15 Quality bar.** `go vet` and `staticcheck` clean; race tests green; integration tests use real processes and sockets with nothing mocked; no test skipped, deleted or loosened; no TODO or stub left; graceful shutdown on SIGINT and SIGTERM for all four process types; structured logs.
+- **16 Security.** README warning; bodies and redacted headers never persisted; tokens never logged; `127.0.0.1` by default; QA exposure documented.
+- **17 Deliverables.** Every listed file and Makefile target.
+
+## Not met, or only partly
+
+- **macOS (4, 15).** Builds, never run. No macOS machine was available.
+- **"Headers preserved byte for byte" (8.1).** Header values are preserved. Header names are not preserved byte for byte: Go's HTTP stack canonicalises their case (`x-custom` arrives as `X-Custom`) and does not keep their order. HTTP treats names as case-insensitive, so servers should not care, but it is not literally what the PRD says.
+- **OpenAI format for LLM faults (8.5).** Stretch goal, not built.
+- **MCP faults (M8).** Not attempted, see above.
+- **Accessibility (12).** Built to the stated rules and one keyboard-only path is tested. No screen reader test and no automated audit was run, so "accessible" is asserted rather than verified.
+- **The GitHub Actions workflow (M7).** Written, never executed: the repository has no remote.
+- **"First useful result within 20 minutes on an existing project" (2).** Not measured. The quickstart takes under a minute against the demo; that says little about a real project.
+- **UI smoke test browsers.** Chromium only.
+
+## Risks I cannot close from here
+
+The acceptance suite is hidden and I did not open `faultline-acceptance/`. Where the PRD left a contract open I took the simplest reading and recorded it. The readings most likely to disagree with a suite written from the same PRD:
+
+| Decision | What I chose | What a suite might expect instead |
+|---|---|---|
+| D14 | `validate` prints `path: message` lines to stdout | stderr |
+| D17 | A matching fault whose strategy does not fire ends matching for that request | Fall through to the next fault |
+| D19 | Record `status` 0 for a response cut mid-body | The upstream status |
+| D20 | `fault_id`, `fault_type` are `null` when no fault applied | Empty strings |
+| D21, D22 | Shapes of `records` (`{records, next}`) and `stats` | Other field names; the PRD does not give them |
+| D23 | Admin `PUT` requires `end_at` and `lease_id` | Optional |
+| D31 | Control timestamps have second precision | Sub-second |
+| D32 | Probes carry the run id | Unscoped probes |
+| D39 | `up` prints tokens only when it generated them | Always |
+| D40, D56 | 409 for aborting a finished run and for a report of a running run; 502 from the kill switch when the proxy is unreachable | Other codes |
+| D5 | Relative `data_dir` resolves against the working directory | Against the config file |
+| D8 | `*` in a path glob crosses `/` | Stops at `/` |
+
+Other things worth knowing:
+
+- Timing assertions (latency windows, lease expiry, time to first byte) have margins that held on this machine and in the container across every run. On a much slower or heavily loaded machine they could fail without a product defect.
+- Throughput was never measured. The proxy has had no load test; the largest volume in any test is 5,200 requests.
+- The record ring size (200,000) and the control's in-memory record list are not configurable. A long run at high request rates could exceed the ring, and findings would then be computed from the most recent records only.
+- Fault windows are absolute times. Proxy and control on hosts with skewed clocks would start and stop faults early or late.
+- On Windows a graceful stop of `proxy` or `control` is only possible through `faultline up` (stdin pipe) or Ctrl+C in a console. `Process.Kill` from another program is a hard kill; the lease then does the cleanup.
+
+## Defects found by tests and reviews along the way
+
+Listed because they show where the risk was: redaction could be bypassed with YAML aliases, merge keys and tagged keys (M0 review); the demo built URLs from an unescaped path value (M1 review); the garble mask barely depended on the seed (M2 tests); record strings were unbounded (M2 review); quoted `traffic.command` lines could not work on Windows (M4 test); `missing_timeout` was hidden by holds cut short at the end of injection (M5 design); the CLI trusted the run id returned by the server for file paths (M5 review); the `run_aborted` audit entry appeared after the aborted status (M6 race run).
+
+## What I would do next
+
+1. Run the hidden acceptance suite and reconcile the decisions in the table above with whatever it expects.
+2. Push to a remote and get the CI workflow green, including the macOS job.
+3. Load-test the proxy: latency overhead and throughput with and without an active run.
+4. Make the record ring size configurable and have control persist the records it needs for findings, so long runs are not bounded by memory.
+5. Write a contract for M8 before building it: fault types for MCP tool calls over Streamable HTTP (`tools/call` error results, slow tools, malformed results, dropped SSE streams), their parameters, and an MCP server in `faultline-demo` to test against.
+6. OpenAI chat-completions format for the LLM faults.
+7. An automated accessibility check (axe) in the Playwright run, and Firefox and WebKit projects.

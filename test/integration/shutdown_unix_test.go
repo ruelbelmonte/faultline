@@ -52,3 +52,13 @@ func TestUpForwardsSignalsAndStopsChildren(t *testing.T) {
 		}
 	}
 }
+
+func TestDemoGracefulShutdownOnSignal(t *testing.T) {
+	for _, sig := range []os.Signal{syscall.SIGTERM, os.Interrupt} {
+		d := startDemo(t, "naive", "http://127.0.0.1:1")
+		d.cmd.Process.Signal(sig)
+		if code := d.wait(8 * time.Second); code != 0 {
+			t.Fatalf("%v: expected a clean exit, got %d", sig, code)
+		}
+	}
+}
