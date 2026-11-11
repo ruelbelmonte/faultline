@@ -205,6 +205,37 @@ Known gaps:
 
 **Not attempted.** M0 to M7 are green, so the precondition holds, but the PRD gives M8 no contract: section 2 points to section 13 for it, and section 13 describes only the demo. Building it would have meant inventing fault types, parameters and a demo MCP server with nothing to check them against. What it would take is listed under "What I would do next".
 
+## Continuation baseline (2026-11-12)
+
+Full existing gate re-run at commit `2b7d542` before any new work. **Green.**
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags integration ./test/...`, `gofmt -l cmd internal test` | Windows | clean |
+| `go test ./... -count=1` | Windows | 133 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 76 top-level tests pass, 0 fail, 0 skip (215s) |
+| `npx playwright test` in `ui/` | Windows, Chromium | 7 pass, 0 fail, 0 skip |
+| `sh .tools/race.sh "make lint && make test-race"` | Linux container | vet, gofmt, staticcheck clean; unit ok; integration ok with `-race` (239s) |
+| `docker compose -f examples/docker-compose.yaml up --build -d`, then `faultline run examples/experiments/ --fail-on-breach` | Docker Desktop, Windows CLI | passed, failed, failed, passed; exit code 10, as documented |
+
+The first two compose attempts failed with exit code 1 and were not product failures: a second agent session had been given the same task in this working tree and was starting and stopping the same compose project at the same moment (visible in `docker events` as the containers being recreated two seconds after they started). The result above is the run made after that session was stopped.
+
+## Work item 1: acceptance suite
+
+Ran `faultline-acceptance/` as a black box against `bin/faultline.exe` and `bin/faultline-demo.exe` built from commit `2b7d542`. Only its README, `requirements.txt` and test output were read; the test source was not opened.
+
+| Command | Where | Result |
+|---|---|---|
+| `python -m pytest --tb=line -rfEs -q -p no:cacheprovider --durations=10` in `faultline-acceptance/`, with `FAULTLINE_BIN` and `FAULTLINE_DEMO_BIN` set, Python 3.10 venv with `requirements.txt` plus `playwright` and its Chromium | Windows | **56 passed, 0 failed, 0 skipped** (298s) |
+
+All seven groups ran, including the UI test (G), which the suite skips unless Playwright is installed. Group counts match the suite's README: A 7, B 14, C 9, D 10, E 9, F 6, G 1.
+
+There was nothing to reconcile: no product change and no change to a decision. The suite did not contradict any reading in the "Risks I cannot close from here" table. That is weaker than confirming them: a reading the suite does not probe (for example D5, D31 or D39) is still only my reading of the PRD.
+
+Gate: unchanged from the continuation baseline above, since no code changed.
+
+Known gaps: the suite was run on Windows only, once at this point and again after the later work items (see the final report).
+
 ---
 
 # Final report
