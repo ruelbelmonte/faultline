@@ -64,6 +64,7 @@ func (c *Control) Handler() http.Handler {
 	api.HandleFunc("POST /api/v1/kill", c.handleKill)
 	api.HandleFunc("GET /api/v1/faults/active", c.handleFaultsActive)
 	api.HandleFunc("GET /api/v1/audit", c.handleAudit)
+	api.HandleFunc("GET /api/v1/runs/{id}/report", c.handleReport)
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

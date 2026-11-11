@@ -118,3 +118,31 @@ Gate, against the demo LLM mock through a real proxy, stream and non-stream for 
 Closed from M3's known gaps: `traffic.command` now has an integration test (`TestTrafficCommand`), which found that quoted commands could not work on Windows (fixed, D50).
 
 Known gaps: OpenAI format is a PRD stretch goal and is not built.
+
+## M5: findings, reports, `run` CLI
+
+Built: `internal/findings` (seven rules, thresholds in `thresholds.go`), `internal/report` renderers (JSON, Markdown, self-contained HTML with inline SVG timeline, JUnit), report files under `{data_dir}/reports/{run_id}/`, `GET /api/v1/runs/{id}/report`, `finding` events on the run stream, CLI `run`, `status`, `stop`, `report`.
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags integration ./test/...` | Windows, Linux | clean |
+| `go test ./...` | Windows | 131 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 74 top-level tests pass, 0 fail, 0 skip |
+| `go test ./... -race` | Linux container | ok |
+| `FAULTLINE_ITEST_RACE=1 go test -race -tags integration ./test/integration/ -count=1 -timeout 30m` | Linux container | ok (265s) |
+
+Gate:
+
+- naive mode triggers `retry_amplification`, `retry_without_backoff`, `retry_after_ignored`, `missing_timeout`; good mode triggers none of them for the same two experiments: `TestFindingsNaiveVersusGood`
+- the other three rules end to end: `TestFindingsFromVerdictRules`
+- HTML has no external URLs, JUnit parses, four formats with content types, files on disk: `TestReports`, `TestCLIRunWritesReports`, unit `TestHTMLIsSelfContained`, `TestJUnit`
+- `run` exit codes 0, 10, 11, 12, 2, 1 and worst-of across a directory: `TestCLIRunExitCodes`, `TestCLIRunDirectoryUsesWorstExitCode`, `TestCLIRunErrors`
+- `status`, `stop`, `report`, and the `init` example passing against the demo: `TestCLIStatusStopReport`.
+
+**Green.**
+
+Design change made while writing the gate tests, recorded as D53: the first experiment design for `missing_timeout` would not have produced the finding in naive mode, because most sampled holds were cut short by the end of injection. The rule now leaves those samples out, with a unit test for each direction (`TestMissingTimeoutIgnoresHoldsCutByClear`).
+
+Closed from M3's known gaps: reports and findings exist, so `TestRedactionOfSecrets` now scans all four report formats and the report files on disk.
+
+Known gaps: none for M5.

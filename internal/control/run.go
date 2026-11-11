@@ -11,6 +11,7 @@ import (
 
 	"faultline/internal/experiment"
 	"faultline/internal/fault"
+	"faultline/internal/findings"
 	"faultline/internal/report"
 )
 
@@ -124,6 +125,13 @@ func (r *Run) Snapshot() (report.Document, Meta) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.snapshotLocked()
+}
+
+// finishing reports whether the run has reached a terminal status.
+func (r *Run) finishing() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return report.Terminal(r.doc.Status)
 }
 
 func (r *Run) persist() {
@@ -644,6 +652,8 @@ func (r *Run) finalize(precheckFailed bool) {
 		r.summariseLocked()
 	}
 	verdict, reason := r.verdictLocked(cause, precheckFailed)
+	r.doc.Findings = findings.Evaluate(r.findingsInputLocked(injected && cause == nil))
+	found := append([]report.Finding{}, r.doc.Findings...)
 	r.doc.Verdict = &verdict
 	if reason != "" {
 		r.doc.Reason = &reason
@@ -662,8 +672,12 @@ func (r *Run) finalize(precheckFailed bool) {
 	r.mu.Unlock()
 
 	r.persist()
+	r.c.writeReports(r.id)
 	if cause != nil {
 		r.c.audit(cause.actor, "run_aborted", r.id, map[string]any{"reason": cause.reason})
+	}
+	for _, f := range found {
+		r.publish("finding", f)
 	}
 	r.c.log.Info("run finished", "run_id", r.id, "status", final.Status, "verdict", verdict, "reason", reason)
 	r.publish("status", final)
@@ -675,6 +689,31 @@ func (r *Run) finalize(precheckFailed bool) {
 		close(ch)
 	}
 	r.mu.Unlock()
+}
+
+// findingsInputLocked gathers the evidence the finding rules work from.
+func (r *Run) findingsInputLocked(completed bool) findings.Input {
+	in := findings.Input{
+		Hypothesis:                  r.doc.Hypothesis,
+		RetryAmplificationThreshold: r.c.cfg.RetryAmplificationThreshold,
+		InjectionCompleted:          completed,
+		RecoveryMeasured:            completed,
+		RecoverySeconds:             r.doc.RecoverySeconds,
+		RecoveryTimeoutS:            r.exp.RecoveryTimeout.Seconds(),
+		ClearedAt:                   r.injEnd,
+	}
+	for _, rec := range r.records {
+		if rec.Scoped || r.exp.Scope == experiment.ScopeAll {
+			in.Records = append(in.Records, rec)
+		}
+	}
+	for i, f := range r.exp.Faults {
+		in.Faults = append(in.Faults, findings.Fault{ID: f.ID, Route: f.Route, Match: f.Match, Triggers: r.doc.Faults[i].Triggers})
+		if f.Type == fault.Timeout {
+			in.TimeoutFaults = append(in.TimeoutFaults, findings.TimeoutFault{ID: f.ID, Route: f.Route, HoldMs: float64(f.Typed.Hold.Milliseconds())})
+		}
+	}
+	return in
 }
 
 // summariseLocked computes injection-phase metrics and hypothesis entries.

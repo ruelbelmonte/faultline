@@ -54,9 +54,20 @@ func (c *Control) CreateRun(rawYAML []byte) (string, error) {
 		return "", errs
 	}
 	c.mu.Lock()
-	if c.active != nil {
+	for c.active != nil {
+		prev := c.active
 		c.mu.Unlock()
-		return "", ErrRunActive
+		if !prev.finishing() {
+			return "", ErrRunActive
+		}
+		// The previous run already shows a terminal status and is writing
+		// its reports; a client that saw that status may start the next run.
+		select {
+		case <-prev.done:
+		case <-time.After(15 * time.Second):
+			return "", ErrRunActive
+		}
+		c.mu.Lock()
 	}
 	r := newRun(c, exp, rawYAML)
 	c.active = r
@@ -150,6 +161,7 @@ func (c *Control) recoverUnfinished() error {
 		if err := c.store.SaveRun(doc, meta, nil); err != nil {
 			return err
 		}
+		c.writeReports(id)
 		c.audit(ActorSystem, "run_aborted", id, map[string]any{"reason": reason})
 		c.log.Warn("run interrupted by a control restart marked aborted", "run_id", id)
 	}

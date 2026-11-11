@@ -136,3 +136,33 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 **D49. `llm_slow_first_token` and `llm_stream_cut` work on any response, streaming or not.** The cut happens as soon as `after_bytes` bytes have been forwarded, without waiting for the upstream to send more.
 
 **D50. `traffic.command` runs through `sh -c` (own process group, killed as a group) or `cmd.exe /S /C` (killed with `taskkill /T`).** Its output is discarded.
+
+## Findings and reports
+
+**D51. Retry rules judge each faulted route separately and group by correlation id.** A route is "faulted" when at least one of the run's requests on it was faulted. `retry_amplification` averages over every correlation seen on that route. A request without a correlation id cannot be attributed and is ignored by the retry rules.
+
+**D52. Retry gaps are measured from the end of the faulted response to the arrival of the next request of the same correlation on the same route.** Two requests of one correlation that overlap by more than 5 ms are parallel calls, not an attempt and its retry, and are skipped. `retry_without_backoff` and `retry_after_ignored` are reported when there is at least one occurrence.
+
+**D53. `missing_timeout` ignores holds that ended because the faults were cleared.** Such a hold shows neither a caller giving up nor a caller sitting the hold out. Without this, a short injection phase filled the sample with cut-short holds and hid callers that have no timeout. The proxy record still carries the true `client_held_ms`; control recognises these records by their end time falling at the moment it cleared the faults (300 ms tolerance).
+
+**D54. `slow_recovery` and `fault_not_triggered` are only reported for runs that completed injection.** An aborted run measured neither. `steady_state_breach` is reported for any hypothesis entry that did not pass, including on aborted runs.
+
+**D55. Findings are ordered high, medium, low, info.** Several findings can share an id (one `steady_state_breach` per breached threshold, one retry finding per route).
+
+**D56. `GET /api/v1/runs/{id}/report` answers 409 `run_in_progress` until the run is terminal, and 400 `invalid_format` for a missing or unknown format.** Reports are rendered from the stored document on every request and are sent as attachments (`Content-Disposition`), with `Content-Security-Policy: sandbox`, so an HTML report is never rendered as a page of the control plane's origin. Every successful download is audited.
+
+**D57. The HTML report contains no URL-like reference at all**, not even an SVG namespace or a CSS `url()`: fault windows are a translucent dashed box rather than a pattern fill. Lines differ by dash pattern as well as colour, the verdict carries a symbol and a word, and the timeline numbers are repeated in a table.
+
+**D58. JUnit: the root element is `<testsuite>`** with `tests` and `failures` counts. Testcase names are the hypothesis names, `fault {id} triggered`, and `run not aborted`.
+
+## CLI (remote commands)
+
+**D59. `faultline run` stops at the first file that fails validation (exit 2) or that the control plane refuses (exit 1).** Files in a directory run in name order. Without `--fail-on-breach` the exit code is 0 whatever the verdicts, as PRD 11 says.
+
+**D60. `--format` without `--report-dir` is a usage error (exit 2).** Reports have nowhere to go otherwise.
+
+**D61. A missing `FAULTLINE_TOKEN` is a usage error (exit 2); a rejected token or an unreachable control plane is exit 1.**
+
+**D62. Interrupting `faultline run` (Ctrl+C) aborts the run it started and exits 1.** Leaving faults injecting after the operator walked away would be the unsafe default.
+
+**D63. A new run may be created the moment the previous one shows a terminal status.** Control finishes writing the previous run's reports first (it waits up to 15 s) instead of answering 409, so `faultline run <dir>` and API clients that poll for completion do not race it.
