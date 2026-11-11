@@ -5,9 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -112,16 +109,7 @@ func (r *Run) sendOne(ctx context.Context, client *http.Client, base string, spe
 // discarded: it may contain anything, and nothing of it is stored.
 func (r *Run) driveCommand(ctx context.Context, command string) {
 	for ctx.Err() == nil {
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.CommandContext(ctx, "cmd", "/C", command)
-			cmd.Cancel = func() error {
-				// Kills the whole tree; cmd /C does not forward termination.
-				return exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
-			}
-		} else {
-			cmd = exec.CommandContext(ctx, "sh", "-c", command)
-		}
+		cmd := shellCommand(ctx, command)
 		cmd.WaitDelay = 2 * time.Second
 		cmd.Env = append(os.Environ(),
 			"FAULTLINE_RUN_ID="+r.id,

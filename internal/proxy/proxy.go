@@ -175,6 +175,8 @@ type forwardOpts struct {
 	bytesPerSec    int
 	garble         bool
 	firstByteDelay time.Duration
+	// rewrite replaces the plain relay of the upstream response.
+	rewrite func(w http.ResponseWriter, r *http.Request, resp *http.Response, o forwardOpts) outcome
 }
 
 func (p *Proxy) setFaultHeader(h http.Header, r *rule) {
@@ -216,6 +218,10 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt *route, rest 
 	if err != nil {
 		return p.upstreamError(w, o.rule, err)
 	}
+	if o.rewrite != nil {
+		// The body has to be readable to be rewritten.
+		req.Header.Del("Accept-Encoding")
+	}
 	resp, err := p.transport.RoundTrip(req)
 	if err != nil {
 		if r.Context().Err() != nil {
@@ -224,7 +230,14 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt *route, rest 
 		return p.upstreamError(w, o.rule, err)
 	}
 	defer resp.Body.Close()
+	if o.rewrite != nil {
+		return o.rewrite(w, r, resp, o)
+	}
+	return p.relay(w, r, resp, o)
+}
 
+// relay copies an upstream response to the client, applying byte-level faults.
+func (p *Proxy) relay(w http.ResponseWriter, r *http.Request, resp *http.Response, o forwardOpts) outcome {
 	copyHeaders(w.Header(), resp.Header)
 	p.setFaultHeader(w.Header(), o.rule)
 	for k := range resp.Trailer {
@@ -422,7 +435,7 @@ func (p *Proxy) inject(w http.ResponseWriter, r *http.Request, rt *route, rest s
 		}
 		return p.forward(w, r, rt, rest, base)
 	}
-	return p.forward(w, r, rt, rest, base)
+	return p.injectLLM(w, r, rt, rest, d, base)
 }
 
 func (p *Proxy) respond(w http.ResponseWriter, r *rule, status int, body string) {

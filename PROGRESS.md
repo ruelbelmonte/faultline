@@ -99,3 +99,22 @@ Known gaps:
 - Findings are always `[]`, reports are not generated and `GET /api/v1/runs/{id}/report` answers 404 until M5. `TestRedactionOfSecrets` already requests the four report formats so it will cover them once they exist.
 - `run`, `status`, `stop`, `report` CLI commands are M5.
 - `traffic.command` is implemented but has no integration test yet.
+
+## M4: LLM fault types
+
+Built: `internal/proxy/llm.go` (`llm_rate_limit`, `llm_overloaded`, `llm_stream_cut`, `llm_slow_first_token`, SSE-aware `llm_truncate` and `llm_malformed_tool_call` for the Anthropic Messages API, stream and non-stream), per-platform shell helper for `traffic.command`.
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags integration ./test/...` | Windows, Linux | clean |
+| `go build ./...` with `GOOS=linux` and `GOOS=darwin` | Windows | ok |
+| `go test ./...` | Windows | 114 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1` | Windows | 66 top-level tests pass, 0 fail, 0 skip |
+| `go test ./... -race` | Linux container | ok |
+| `FAULTLINE_ITEST_RACE=1 go test -race -tags integration ./test/integration/ -count=1` | Linux container | ok (124s) |
+
+Gate, against the demo LLM mock through a real proxy, stream and non-stream for each: `TestLLMRateLimit`, `TestLLMOverloaded`, `TestLLMStreamCut`, `TestLLMSlowFirstToken`, `TestLLMTruncate`, `TestLLMMalformedToolCall`, plus `TestLLMFaultsThroughControl` (LLM faults installed by a real run). **Green.**
+
+Closed from M3's known gaps: `traffic.command` now has an integration test (`TestTrafficCommand`), which found that quoted commands could not work on Windows (fixed, D50).
+
+Known gaps: OpenAI format is a PRD stretch goal and is not built.

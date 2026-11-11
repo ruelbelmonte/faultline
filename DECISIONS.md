@@ -124,3 +124,15 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 **D44. The traffic driver is open loop.** It dispatches `rps` requests per second to `concurrency` workers; when every worker is busy the backlog is dropped, not queued. Redirects are not followed.
 
 **D45. `faultline up` waits for both children to answer their health checks before printing**, and exits non-zero if either child exits.
+
+## LLM faults
+
+**D46. `llm_truncate` and `llm_malformed_tool_call` only rewrite a 200 response they can read:** `text/event-stream`, or a JSON body up to 32 MB. Upstream errors, compressed bodies and other content types are relayed untouched. For these two fault types the proxy removes `Accept-Encoding` from the upstream request so the body is readable. The fault still counts as triggered.
+
+**D47. `llm_truncate` leaves a response alone when its text is within `max_chars`** (`stop_reason` stays as it was; a stream passes through byte for byte). `max_chars` counts Unicode characters across all text blocks. In a stream the rewritten events are emitted as they arrive, so the stream stays unbuffered and ends as soon as the limit is crossed.
+
+**D48. `llm_malformed_tool_call` on a stream** sets the first `input_json_delta` of each tool_use block to `{"query": "de` and the following ones to an empty string, so the event sequence keeps its shape and the concatenation is invalid JSON. Non-streaming JSON is re-encoded, which may reorder object keys; numbers are preserved exactly.
+
+**D49. `llm_slow_first_token` and `llm_stream_cut` work on any response, streaming or not.** The cut happens as soon as `after_bytes` bytes have been forwarded, without waiting for the upstream to send more.
+
+**D50. `traffic.command` runs through `sh -c` (own process group, killed as a group) or `cmd.exe /S /C` (killed with `taskkill /T`).** Its output is discarded.
