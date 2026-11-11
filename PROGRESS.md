@@ -352,6 +352,14 @@ Known gaps:
 - Safari on macOS itself was not tested: Playwright's WebKit build on Windows and Linux stands in for it.
 - D38 still holds: an experiment with a sensitive header cannot be run from the editor with its real value.
 
+## Work item 5: CI and macOS
+
+**Open.** `git remote -v` prints nothing: the repository has no remote named `origin`, and the instruction for that case is not to create one. Nothing was pushed, `.github/workflows/ci.yaml` has still never run, and macOS is still untested.
+
+What was done towards it without a remote: the workflow was updated for the three-browser UI gate (work item 4), and every job's commands were run by hand in the closest local equivalent, which is recorded in the other sections: lint, unit, cross-compile, race and integration in a `golang:1.27` Linux container; integration natively on Windows; the UI job in the official Playwright Linux image (42 pass); the docker job's image build and compose run through Docker Desktop. None of that covers the `macos-latest` integration job or GitHub's runners themselves.
+
+To close it: add a remote named `origin`, push `master`, and let the workflow run; whatever fails there, in particular in the macOS job, is the remaining work.
+
 ---
 
 # Final report
