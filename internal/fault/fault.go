@@ -25,11 +25,22 @@ const (
 	LLMSlowFirstToken    = "llm_slow_first_token"
 	LLMTruncate          = "llm_truncate"
 	LLMMalformedToolCall = "llm_malformed_tool_call"
+	MCPToolError         = "mcp_tool_error"
+	MCPSlowTool          = "mcp_slow_tool"
+	MCPMalformedResult   = "mcp_malformed_result"
+	MCPStreamDrop        = "mcp_stream_drop"
 )
 
 var Types = []string{
 	Latency, HTTPError, ErrorInBody, Timeout, Reset, SlowBody, CorruptBody,
 	LLMRateLimit, LLMOverloaded, LLMStreamCut, LLMSlowFirstToken, LLMTruncate, LLMMalformedToolCall,
+	MCPToolError, MCPSlowTool, MCPMalformedResult, MCPStreamDrop,
+}
+
+// IsMCP reports whether a fault type acts on MCP tool calls only
+// (docs/mcp-faults.md).
+func IsMCP(t string) bool {
+	return t == MCPToolError || t == MCPSlowTool || t == MCPMalformedResult || t == MCPStreamDrop
 }
 
 const (
@@ -42,6 +53,9 @@ const (
 const (
 	DefaultErrorBody = `{"error":"faultline injected"}`
 	MalformedInput   = `{"query": "de`
+
+	DefaultMCPMessage   = "faultline injected"
+	DefaultMCPErrorCode = -32603
 )
 
 func KnownType(t string) bool {
@@ -91,6 +105,12 @@ type Params struct {
 	AfterBytes  int
 	DelayMS     int
 	MaxChars    int
+	// MCP faults.
+	Tool        string
+	Kind        string
+	Message     string
+	Code        int
+	AfterEvents int
 }
 
 func ValidateStrategy(s *Strategy, path string, errs *yamlx.Errors) {
@@ -185,6 +205,32 @@ func (r *paramReader) str(key string, required bool, def string) string {
 	return s
 }
 
+// oneOf reads a string that must be one of the allowed values.
+func (r *paramReader) oneOf(key, def string, allowed ...string) string {
+	v := r.str(key, false, def)
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	r.errs.Add(r.path+"."+key, "must be %s", strings.Join(allowed, " or "))
+	return def
+}
+
+// integer reads an integer of either sign.
+func (r *paramReader) integer(key string, def int) int {
+	v, ok := r.get(key)
+	if !ok {
+		return def
+	}
+	f, ok := number(v)
+	if !ok || f != math.Trunc(f) {
+		r.errs.Add(r.path+"."+key, "must be an integer")
+		return def
+	}
+	return int(f)
+}
+
 func (r *paramReader) done() {
 	var unknown []string
 	for k := range r.raw {
@@ -266,8 +312,31 @@ func ParseParams(typ string, raw map[string]any, path string, errs *yamlx.Errors
 		p.DelayMS = r.intMin("delay_ms", 0, true, 0)
 	case LLMTruncate:
 		p.MaxChars = r.intMin("max_chars", 0, false, 50)
+	case MCPToolError:
+		p.Kind = r.oneOf("kind", "tool", "tool", "protocol")
+		p.Message = r.str("message", false, DefaultMCPMessage)
+		p.Code = DefaultMCPErrorCode
+		if _, ok := raw["code"]; ok {
+			p.Code = r.integer("code", DefaultMCPErrorCode)
+			if p.Kind != "protocol" {
+				errs.Add(path+".code", "is only allowed with kind: protocol")
+			}
+		}
+	case MCPSlowTool:
+		p.DelayMS = r.intMin("delay_ms", 0, true, 0)
+	case MCPMalformedResult:
+		p.Mode = r.oneOf("mode", "invalid_json", "invalid_json", "schema")
+	case MCPStreamDrop:
+		p.AfterEvents = r.intMin("after_events", 0, false, 0)
 	default:
 		return p
+	}
+	if IsMCP(typ) {
+		if _, ok := raw["tool"]; ok {
+			if p.Tool = r.str("tool", false, ""); p.Tool == "" {
+				errs.Add(path+".tool", "must be a non-empty string")
+			}
+		}
 	}
 	r.done()
 	return p

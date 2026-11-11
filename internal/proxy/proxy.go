@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -121,7 +122,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		path = decoded
 	}
 
-	d := p.engine.Decide(name, r.Method, path, r.Header.Get(p.cfg.ScopeHeader), begin)
+	d := p.engine.DecideCall(name, r.Method, path, r.Header.Get(p.cfg.ScopeHeader), begin, sync.OnceValue(func() *mcpCall { return readToolCall(r) }))
 	var out outcome
 	aborted := false
 	func() {
@@ -489,6 +490,9 @@ func (p *Proxy) inject(w http.ResponseWriter, r *http.Request, rt *route, rest s
 			base.garble = true
 		}
 		return p.forward(w, r, rt, rest, base)
+	}
+	if fault.IsMCP(rule.spec.Type) {
+		return p.injectMCP(w, r, rt, rest, d, base)
 	}
 	return p.injectLLM(w, r, rt, rest, d, base)
 }

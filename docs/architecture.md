@@ -39,6 +39,8 @@ Faultline has three runtime pieces. The proxy and the control plane are separate
 
 **Connection-level faults.** `reset`, `timeout` and the two cut faults take the connection away from the HTTP server. `reset` closes with linger 0, which sends a TCP RST. Cuts and holds flush what was sent and close normally, so the client sees exactly the forwarded bytes followed by an unexpected end.
 
+**MCP tool calls.** For the four `mcp_*` fault types the proxy has to know whether a request is a `tools/call`. When such a fault of the active run matches a request on scope, route, method, path and time window, the proxy reads up to 1 MiB of the request body, decides, and forwards the bytes unchanged. No other request body is ever read by the proxy, and nothing of it is stored. See [mcp-faults.md](mcp-faults.md).
+
 **Request records.** While a rule set is installed, every request on a route is recorded in a bounded in-memory ring (200,000 entries): route, method, path without query string, status, duration, whether it carried the run id, correlation id, fault id and type, the `Retry-After` the proxy sent, and for holds how long the client stayed connected. No header values, no bodies. Path, correlation id and method are length-capped. Control reads the ring every second during injection; if the ring ever wraps before a record was read, the proxy logs a warning naming the run, because that run's findings are then based on incomplete records.
 
 ### Fault lifetime

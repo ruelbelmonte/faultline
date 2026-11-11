@@ -253,12 +253,22 @@ type decision struct {
 	rs     *ruleSet
 	rule   *rule
 	scoped bool
+	// mcp is the tool call an MCP fault matched.
+	mcp *mcpCall
 }
 
 // Decide picks the fault for a request: the first rule in experiment order
 // that matches, if its strategy fires. A match whose strategy does not fire
 // passes through; later rules are not consulted.
 func (e *Engine) Decide(route, method, path, scopeValue string, now time.Time) decision {
+	return e.DecideCall(route, method, path, scopeValue, now, func() *mcpCall { return nil })
+}
+
+// DecideCall is Decide for a request whose body can be inspected: toolCall
+// returns the MCP tool call the request carries, or nil. It is only called
+// when an MCP rule matches the request on everything else, and being a tool
+// call (for the rule's tool, if it names one) is part of that rule's match.
+func (e *Engine) DecideCall(route, method, path, scopeValue string, now time.Time, toolCall func() *mcpCall) decision {
 	if c := e.routes[route]; c != nil {
 		c.requests.Add(1)
 	}
@@ -277,8 +287,14 @@ func (e *Engine) Decide(route, method, path, scopeValue string, now time.Time) d
 		if now.Before(r.startAt) || !now.Before(r.endAt) {
 			continue
 		}
+		var call *mcpCall
+		if fault.IsMCP(r.spec.Type) {
+			if call = toolCall(); call == nil || (r.params.Tool != "" && call.tool != r.params.Tool) {
+				continue
+			}
+		}
 		if r.decide() {
-			d.rule = r
+			d.rule, d.mcp = r, call
 			e.routes[route].faulted.Add(1)
 		}
 		break

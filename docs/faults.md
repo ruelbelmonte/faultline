@@ -87,6 +87,19 @@ Records and `X-Faultline-Fault` behave the same in both formats; the record `sta
 
 `llm_truncate` and `llm_malformed_tool_call` rewrite only a 200 response that is `text/event-stream` or JSON. Upstream errors and compressed bodies are passed through as they are; the proxy asks the upstream for an uncompressed body for these two faults.
 
+## MCP tool faults
+
+`mcp_tool_error`, `mcp_slow_tool`, `mcp_malformed_result` and `mcp_stream_drop` act on MCP `tools/call` requests over Streamable HTTP and on nothing else. Their parameters, validation rules and exact behaviour, and the MCP server in `faultline-demo` that they are tested against, are specified in [mcp-faults.md](mcp-faults.md).
+
+| type | params | In one line |
+|---|---|---|
+| `mcp_tool_error` | `kind` (`tool`, `protocol`), `message`, `code`, `tool` | Answers the call with a tool execution error or a JSON-RPC error, without calling the server. |
+| `mcp_slow_tool` | `delay_ms`, `tool` | Delays the call. |
+| `mcp_malformed_result` | `mode` (`invalid_json`, `schema`), `tool` | Replaces the response to the call with broken JSON or with a result that violates the tool result schema. |
+| `mcp_stream_drop` | `after_events`, `tool` | Cuts the response stream before the result arrives. |
+
+For these four types, being a tool call is part of the match: any other request on the route passes them by, is not counted by their strategy, and can still match a later fault.
+
 ## What the client sees
 
 | Fault | Status | `X-Faultline-Fault` | Record `status` |
