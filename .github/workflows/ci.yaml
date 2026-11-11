@@ -68,10 +68,10 @@ jobs:
         run: git diff --exit-code -- internal/ui/dist
       - name: Build binaries
         run: make build
-      - name: Playwright smoke test
+      - name: Playwright smoke test and accessibility audit (Chromium, Firefox, WebKit)
         working-directory: ui
         run: |
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
           npx playwright test
 
   docker:

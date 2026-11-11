@@ -137,6 +137,6 @@ internal/report/      run document and the four report formats
 internal/cli/         commands
 internal/demo/        demo servers
 internal/ui/          embedded dashboard build
-ui/                   dashboard source (Vue 3, TypeScript, Vite) and Playwright test
+ui/                   dashboard source (Vue 3, TypeScript, Vite), Playwright smoke test and axe audit
 test/integration/     tests against real processes (build tag integration)
 ```

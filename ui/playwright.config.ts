@@ -12,7 +12,16 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:17700',
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // The accessibility audit runs as its own project per browser so that axe
+  // never shares a browser process with the smoke test (DECISIONS D86).
+  projects: [
+    { name: 'chromium', testMatch: /smoke/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', testMatch: /smoke/, use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', testMatch: /smoke/, use: { ...devices['Desktop Safari'] } },
+    { name: 'chromium-a11y', testMatch: /a11y/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox-a11y', testMatch: /a11y/, use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit-a11y', testMatch: /a11y/, use: { ...devices['Desktop Safari'] } },
+  ],
   webServer: {
     command: 'node e2e/stack.mjs',
     url: 'http://127.0.0.1:17700/healthz',
