@@ -28,8 +28,8 @@ func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.L
 		return fmt.Errorf("proxy admin listen: %w", err)
 	}
 
-	traffic := &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second}
-	admin := &http.Server{Handler: p.Admin(adminToken), ReadHeaderTimeout: 10 * time.Second}
+	traffic := &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 1 << 20}
+	admin := &http.Server{Handler: p.Admin(adminToken), ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 64 << 10}
 
 	stopWatch := make(chan struct{})
 	go p.engine.Watch(stopWatch)

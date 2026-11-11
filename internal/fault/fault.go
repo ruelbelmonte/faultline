@@ -361,6 +361,9 @@ type Record struct {
 	ClientHeldMs *float64  `json:"client_held_ms"`
 }
 
+// MaxRecordsPage is the most records one GET /admin/v1/records call returns.
+const MaxRecordsPage = 5000
+
 type RecordPage struct {
 	Records []Record `json:"records"`
 	Next    int64    `json:"next"`

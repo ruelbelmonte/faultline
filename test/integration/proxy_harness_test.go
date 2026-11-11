@@ -55,8 +55,8 @@ func (s *stack) writeConfig(t testing.TB) {
 	t.Helper()
 	var b strings.Builder
 	fmt.Fprintf(&b, "version: 1\nenvironment: %s\ndata_dir: %q\nexperiments_dir: %q\n", s.environment, s.dataDir, filepath.Join(s.dir, "experiments"))
-	fmt.Fprintf(&b, "proxy:\n  listen: %s\n  admin_listen: %s\n  lease_timeout: %s\n", s.trafficAddr, s.adminAddr, s.leaseTimeout)
-	fmt.Fprintf(&b, "control:\n  listen: %s\n  proxy_admin_url: http://%s\n", s.controlAddr, s.adminAddr)
+	fmt.Fprintf(&b, "proxy:\n  listen: %s\n  admin_listen: %s\n  lease_timeout: %s\n%s", s.trafficAddr, s.adminAddr, s.leaseTimeout, s.proxyExtra)
+	fmt.Fprintf(&b, "control:\n  listen: %s\n  proxy_admin_url: http://%s\n%s", s.controlAddr, s.adminAddr, s.controlExtra)
 	b.WriteString(s.extra)
 	b.WriteString("routes:\n")
 	for name, up := range s.routes {

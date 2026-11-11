@@ -92,3 +92,35 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 **D29. `garble` flips every seventh byte** (offsets 0, 7, 14, ...) with a mask derived from the seed and the offset. Same seed, same corruption, independent of how the body is chunked.
 
 **D30. Children of `faultline up` shut down when their stdin closes** (opt-in through the internal `FAULTLINE_PARENT_WATCH=1` environment variable that `up` sets). Reason: Windows cannot deliver SIGTERM to a child process, and it also stops the children if `up` itself is killed. SIGINT and SIGTERM work as usual on every platform that has them.
+
+## Control plane
+
+**D31. Control API timestamps are RFC 3339 in UTC with second precision** (`2026-01-02T15:04:05Z`): the run document, timeseries (`t`, phase and fault-window bounds, markers) and audit entries. Proxy records keep RFC3339Nano as PRD 8.7 says. Reason: the PRD writes "RFC3339" for the report and "RFC3339Nano" for records, and second precision parses everywhere.
+
+**D32. Probes carry the scope header (the run id) and a fresh correlation id, like driver requests.** Alternative: unscoped probes. Reason: with header scoping an unscoped probe can never observe a fault, so `probe_success_min` and `probe_failures_consecutive` would be meaningless for any probe that exercises a dependency. A plain health endpoint behaves the same either way.
+
+**D33. Recovery uses a rolling 5s window that never reaches back into the injection phase.** `recovery_seconds` is the time from injection end until every probe has passed 3 consecutive checks made after injection ended and the error rate of driver requests started after injection ended (at least one) is within the limit. Alternative: a plain rolling 5s window, which would count injection-phase errors and put a floor of about 5s under every failing experiment. With no probes and no request traffic, recovery is 0. The phase ends as soon as recovery is observed.
+
+**D34. `metrics.driver` and the hypothesis cover driver requests that started during injection.** A request still in flight when the run ends is dropped rather than counted as an error. `metrics.proxy` counts the run's own proxied requests (scoped records, or all records under `scope: all`).
+
+**D35. Two abort reasons beyond the PRD's list: `proxy_error`** (the proxy rejected or could not receive the rule set) **and `lease_lost`** (the proxy reported the lease gone mid-injection, so the faults are no longer installed). Reason: continuing either run would produce a verdict about faults that were not there.
+
+**D36. A graceful control shutdown (SIGINT, SIGTERM, parent pipe) aborts the active run with reason `control_restarted`** after clearing its faults. Alternative: leave the run for the next start. Reason: faults are cleared immediately instead of after `lease_timeout`, and the reason stays within the PRD's vocabulary.
+
+**D37. Audit `actor` is `api-token` for API calls and `system` for automatic aborts** (thresholds, restart, proxy error, lease lost).
+
+**D38. The experiments API never returns or writes sensitive header values.** `GET /api/v1/experiments/{name}` returns the file with those values redacted; `PUT` redacts before writing. Consequence: an experiment that needs a secret header must be run from a local file with `faultline run` (the CLI posts the file as is and control keeps the secret in memory only) or posted directly to `POST /api/v1/runs`. Running it from the UI editor would send the literal `[REDACTED]`.
+
+**D39. `faultline up` prints tokens only when it generated them**, as `FAULTLINE_TOKEN=<hex>` and `FAULTLINE_ADMIN_TOKEN=<hex>` lines on stdout. Tokens supplied through the environment are not echoed. Child process logs go to stderr.
+
+**D40. Status codes the PRD leaves open:** `POST /api/v1/runs/{id}/abort` on a finished run is 409 `run_not_active`, unknown run 404 `run_not_found`. `POST /api/v1/kill` answers 502 `{"cleared":false,"error":"proxy_unreachable"}` if the proxy cannot be reached (the run is still aborted). `GET /api/v1/faults/active` answers 502 in the same case. Malformed JSON bodies are 400 `invalid_json`. `POST /api/v1/experiments/validate` is 200 for any YAML, valid or not.
+
+**D41. `GET /api/v1/runs` items carry exactly the five PRD fields.** The UI reads `ended_at` from the run document to show duration, rather than adding a field to a contract.
+
+**D42. Hypothesis entries are also computed for aborted runs**, over the part of the injection that ran. The verdict is still `aborted`.
+
+**D43. Run events are consumed with `fetch` and an `Authorization` header.** `EventSource` cannot send headers, and accepting the token in the query string would put it in access logs.
+
+**D44. The traffic driver is open loop.** It dispatches `rps` requests per second to `concurrency` workers; when every worker is busy the backlog is dropped, not queued. Redirects are not followed.
+
+**D45. `faultline up` waits for both children to answer their health checks before printing**, and exits non-zero if either child exits.

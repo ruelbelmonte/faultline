@@ -737,7 +737,7 @@ func TestScoping(t *testing.T) {
 	})
 
 	t.Run("expose_fault_header false", func(t *testing.T) {
-		p3, _ := startEchoProxy(t, func(s *stack) { s.extra = ""; s.leaseTimeout = "10s\n  expose_fault_header: false" })
+		p3, _ := startEchoProxy(t, func(s *stack) { s.proxyExtra = "  expose_fault_header: false\n" })
 		p3.install(t, testRun, "header", flt("f1", "http_error", "svc", obj{"status": 503}))
 		res := call("GET", p3.url("/svc/x"), scoped(testRun), "")
 		if res.status != 503 || res.header.Get("X-Faultline-Fault") != "" {
