@@ -2,11 +2,14 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,15 +35,26 @@ type Proxy struct {
 	engine    *Engine
 	records   *ring
 	transport http.RoundTripper
+	tlsConfig *tls.Config
 	log       *slog.Logger
 }
 
 func New(cfg *config.Config, log *slog.Logger) (*Proxy, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	// HTTP/1.1 only: HTTP/2 lower-cases header names on the wire.
+	tlsDialer := &tls.Dialer{NetDialer: dialer, Config: &tls.Config{NextProtos: []string{"http/1.1"}}}
+	wrap := func(c net.Conn, err error) (net.Conn, error) {
+		if err != nil {
+			return nil, err
+		}
+		return &outConn{Conn: c}, nil
+	}
 	p := &Proxy{
-		cfg:     cfg,
-		routes:  map[string]*route{},
-		records: newRing(DefaultRingSize),
-		log:     log,
+		cfg:       cfg,
+		routes:    map[string]*route{},
+		records:   newRing(DefaultRingSize),
+		tlsConfig: tlsDialer.Config,
+		log:       log,
 		transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			// Bytes must reach the client exactly as the upstream sent them.
@@ -48,8 +62,12 @@ func New(cfg *config.Config, log *slog.Logger) (*Proxy, error) {
 			MaxIdleConns:        512,
 			MaxIdleConnsPerHost: 128,
 			IdleConnTimeout:     90 * time.Second,
-			ForceAttemptHTTP2:   true,
-			DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return wrap(dialer.DialContext(ctx, network, addr))
+			},
+			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return wrap(tlsDialer.DialContext(ctx, network, addr))
+			},
 		},
 	}
 	var names []string
@@ -80,6 +98,12 @@ type outcome struct {
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	begin := time.Now()
+	if c, ok := r.Context().Value(connKey{}).(*inConn); ok {
+		// Every request on the connection must pass here, routed or not.
+		if lines := c.requestHead(r); lines != nil {
+			r = r.WithContext(context.WithValue(r.Context(), headKey{}, lines))
+		}
+	}
 	name, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
 	rt := p.routes[name]
 	if rt == nil {
@@ -148,16 +172,13 @@ var hopByHop = []string{
 	"Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
+type (
+	connKey struct{}
+	headKey struct{}
+)
+
 func copyHeaders(dst, src http.Header) {
-	drop := map[string]bool{}
-	for _, h := range hopByHop {
-		drop[h] = true
-	}
-	for _, v := range src.Values("Connection") {
-		for _, name := range strings.Split(v, ",") {
-			drop[http.CanonicalHeaderKey(strings.TrimSpace(name))] = true
-		}
-	}
+	drop := hopSet(src.Values("Connection"))
 	for k, vs := range src {
 		if drop[k] {
 			continue
@@ -185,7 +206,9 @@ func (p *Proxy) setFaultHeader(h http.Header, r *rule) {
 	}
 }
 
-func (p *Proxy) upstreamRequest(r *http.Request, rt *route, rest string) (*http.Request, error) {
+// upstreamRequest builds the request for the upstream. readable asks the
+// upstream for an uncompressed body, for faults that rewrite it.
+func (p *Proxy) upstreamRequest(r *http.Request, rt *route, rest string, readable bool) (*http.Request, error) {
 	target := *rt.upstream
 	target.Path, target.RawPath = "", ""
 	base := strings.TrimRight(rt.upstream.EscapedPath(), "/")
@@ -195,11 +218,33 @@ func (p *Proxy) upstreamRequest(r *http.Request, rt *route, rest string) (*http.
 	}
 	u.RawQuery = r.URL.RawQuery
 
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), nil)
+	// The connection is told which head to write once the transport has
+	// picked it. A nil template disarms a connection armed by a request that
+	// was abandoned before it was written.
+	var tmpl []headerLine
+	sentCacheControl := true
+	if lines, ok := r.Context().Value(headKey{}).([]headerLine); ok {
+		tmpl = forwardLines(lines, readable)
+		sentCacheControl = slices.ContainsFunc(lines, func(l headerLine) bool { return http.CanonicalHeaderKey(l.name) == "Cache-Control" })
+	}
+	ctx := httptrace.WithClientTrace(r.Context(), &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) {
+		if c, ok := info.Conn.(*outConn); ok {
+			c.arm(tmpl)
+		}
+	}})
+
+	req, err := http.NewRequestWithContext(ctx, r.Method, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	copyHeaders(req.Header, r.Header)
+	if readable {
+		req.Header.Del("Accept-Encoding")
+	}
+	if !sentCacheControl {
+		// Go's server adds it next to Pragma: no-cache; the client did not send it.
+		req.Header.Del("Cache-Control")
+	}
 	if _, ok := req.Header["User-Agent"]; !ok {
 		// Stops the transport from adding its own.
 		req.Header.Set("User-Agent", "")
@@ -214,13 +259,9 @@ func (p *Proxy) upstreamRequest(r *http.Request, rt *route, rest string) (*http.
 // forward streams the request upstream and the response back. Nothing is
 // buffered: every read from upstream is written and flushed at once.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt *route, rest string, o forwardOpts) outcome {
-	req, err := p.upstreamRequest(r, rt, rest)
+	req, err := p.upstreamRequest(r, rt, rest, o.rewrite != nil)
 	if err != nil {
 		return p.upstreamError(w, o.rule, err)
-	}
-	if o.rewrite != nil {
-		// The body has to be readable to be rewritten.
-		req.Header.Del("Accept-Encoding")
 	}
 	resp, err := p.transport.RoundTrip(req)
 	if err != nil {
@@ -355,7 +396,7 @@ func closeConn(w http.ResponseWriter, reset bool) {
 	if err != nil {
 		panic(http.ErrAbortHandler)
 	}
-	if tcp, ok := conn.(*net.TCPConn); ok && reset {
+	if tcp, ok := conn.(interface{ SetLinger(int) error }); ok && reset {
 		tcp.SetLinger(0)
 	}
 	conn.Close()

@@ -28,7 +28,10 @@ func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.L
 		return fmt.Errorf("proxy admin listen: %w", err)
 	}
 
-	traffic := &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 1 << 20}
+	traffic := &http.Server{
+		Handler: p, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 1 << 20,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context { return context.WithValue(ctx, connKey{}, c) },
+	}
 	admin := &http.Server{Handler: p.Admin(adminToken), ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 64 << 10}
 
 	stopWatch := make(chan struct{})
@@ -36,7 +39,7 @@ func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.L
 	defer close(stopWatch)
 
 	errc := make(chan error, 2)
-	go func() { errc <- traffic.Serve(trafficLn) }()
+	go func() { errc <- traffic.Serve(rawListener{trafficLn}) }()
 	go func() { errc <- admin.Serve(adminLn) }()
 	log.Info("proxy listening", "traffic", trafficLn.Addr().String(), "admin", adminLn.Addr().String(),
 		"routes", len(cfg.Routes), "environment", cfg.Environment, "lease_timeout", cfg.LeaseTimeout.String())

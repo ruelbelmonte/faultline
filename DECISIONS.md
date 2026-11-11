@@ -204,3 +204,21 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 **D78. LICENSE copyright holder is "Faultline contributors".** The PRD names MIT but no legal entity.
 
 **D79. `make lint` is `go vet`, a `gofmt` check and `staticcheck` (pinned, run with `go run`).** No linter is added as a module dependency.
+
+## Header fidelity (PRD 8.1)
+
+**D80. Request header names and order are forwarded byte for byte by capturing the raw request head and rewriting the head Go writes upstream.**
+Go's `net/http` server canonicalises names into a map and its client writes them sorted, so neither spelling nor order survives it. Alternatives: (a) leave it and document it, which is what the first final report did; (b) replace `net/http` on both legs with a hand-written HTTP/1.1 parser and writer. Chosen: keep `net/http` for all parsing, framing, connection reuse and streaming, and add two connection wrappers in `internal/proxy/rawhead.go`.
+
+- `inConn` (client side) keeps the raw bytes of each request head. To know where the next head starts on a keep-alive connection it follows the body framing, but the framing itself (fixed length, chunked, none) is taken from what Go's server parsed, never from its own reading of the headers.
+- A raw head is used only if it is plain `name: value` lines and says exactly what Go parsed: same request line, same values per name, nothing extra. Otherwise that connection falls back to Go's canonical, sorted headers for the rest of its life. This is what keeps the mechanism from becoming a request-smuggling path: nothing is replayed that Go did not also accept and validate.
+- `outConn` (upstream side) is armed, through `httptrace.GotConn`, with the client's lines once the transport has picked a connection, and rewrites the next head written to it: the client's lines in the client's order, `Host` and `Content-Length` in place with Go's values, lines only Go has (`Transfer-Encoding: chunked`) last. Bodies are never touched or buffered, so streaming is unchanged.
+
+Consequences, all deliberate:
+
+- **Upstream connections are HTTP/1.1 only**, including over TLS (ALPN offers `http/1.1`). HTTP/2 requires lower-case names, so it cannot carry the client's bytes. Before this change `https` upstreams could negotiate HTTP/2.
+- Normalised rather than preserved: whitespace around values and line endings (`name: value\r\n`), and the chunk boundaries of a chunked request body.
+- Go adds `Cache-Control: no-cache` to a request that has only `Pragma: no-cache`. The proxy used to forward that addition; it no longer does.
+- Not covered: a request with an obsolete folded header (fallback), an `https` upstream reached through `HTTPS_PROXY` (the transport dials TLS itself, fallback), and **response** header names, which still reach the client canonicalised and sorted. PRD 8.1 states fidelity for the forwarded request; the response direction would need the same mechanism mirrored and is listed as not done in the final report.
+
+Proof: `TestRequestHeadersArePreservedByteForByte` and `TestRequestHeaderFidelityUnderConcurrency` (real proxy process, raw TCP client, raw TCP upstream comparing the received bytes), unit tests in `internal/proxy/rawhead_test.go` (framing, pipelining, fallback, TLS upstream).
