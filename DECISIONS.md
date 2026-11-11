@@ -62,3 +62,33 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 **D15. `faultline init` never overwrites.** Existing files are reported and left unchanged; exit 0.
 
 **D16. Flags may appear before or after positional arguments.** The standard `flag` package stops at the first positional argument, and the PRD shows `faultline run <file> --fail-on-breach`.
+
+## Proxy
+
+**D17. First matching fault wins, and there is no fall-through.** The first fault in experiment order whose scope, route, method, path and time window match is the fault for that request. If its strategy does not fire, the request passes through unfaulted; later faults are not consulted. Alternative: fall through to the next fault. Reason: literal reading of "first matching fault in experiment order wins; one fault per request" in PRD 8.3. Consequence: two faults with the same match do not combine; give them distinct matches.
+
+**D18. Reset closes with linger 0 (TCP RST). Cut and hold close normally (FIN) with the response left unterminated.** Alternative: RST for all three. Reason: an RST lets the client's kernel discard bytes it has not read yet, which would break "forward exactly N bytes". With FIN the client receives exactly the forwarded bytes and then an unexpected end of stream.
+
+**D19. Record `status` is 0 for reset, for timeout, and for any response the proxy cut mid-body** (`corrupt_body` truncate, `llm_stream_cut`), even though the client saw a status line. Reason: PRD 8.7 lists "reset, cut or timeout". A truncate whose `at_bytes` exceeds the body is not a cut and keeps the upstream status.
+
+**D20. `fault_id`, `fault_type`, `retry_after` and `client_held_ms` are `null` when they do not apply. `correlation` is `""` when the header is absent** (the PRD example says "uuid-or-empty").
+
+**D21. `GET /admin/v1/records` returns `{records, next}`.** `next` is the highest sequence number examined; pass it back as `since`. With an empty `run_id` records of every run are returned.
+
+**D22. `GET /admin/v1/stats` returns `{run_id, active, routes, faults, events}`.** `routes` counts every request since the proxy started. `faults` holds triggers for the current or most recent run, so control can read final trigger counts after it has cleared the faults. `events` holds the last 100 of `installed`, `cleared`, `lease_expired`, `shutdown`.
+
+**D23. `PUT /admin/v1/faults` requires `run_id`, `lease_id`, `scope_mode` and an `end_at` on every fault; `start_at` defaults to now.** Faults use the same shape as in the experiment file (`id, type, route, match, strategy, params`) plus the absolute window. An optional top-level `seed` seeds probability and garble. Lease renewal answers 404 when nothing is installed and 409 for a different `lease_id`.
+
+**D24. The proxy does not enforce `control.allow_unscoped`.** That key governs which experiments control accepts. The admin API is the trusted, token-protected interface.
+
+**D25. Clearing faults also releases in-flight work:** holds are closed, latency and slow-first-token delays end and the request is forwarded, throttled bodies continue at full speed.
+
+**D26. `latency` and every other fault that still produces a response carry `X-Faultline-Fault`.** The header is absent only when no response is sent (reset, timeout) or when `expose_fault_header` is false.
+
+**D27. Upstream failure is 502 `{"error":"upstream_unreachable"}` with `X-Faultline: upstream-error`.** The PRD does not specify it.
+
+**D28. Not supported: protocol upgrades (WebSocket) and `CONNECT`.** `Upgrade` is a hop-by-hop header and is removed. The PRD scopes the proxy to reverse-proxied HTTP.
+
+**D29. `garble` flips every seventh byte** (offsets 0, 7, 14, ...) with a mask derived from the seed and the offset. Same seed, same corruption, independent of how the body is chunked.
+
+**D30. Children of `faultline up` shut down when their stdin closes** (opt-in through the internal `FAULTLINE_PARENT_WATCH=1` environment variable that `up` sets). Reason: Windows cannot deliver SIGTERM to a child process, and it also stops the children if `up` itself is killed. SIGINT and SIGTERM work as usual on every platform that has them.

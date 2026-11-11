@@ -80,20 +80,40 @@ func (b *syncBuffer) String() string {
 }
 
 type proc struct {
-	t    testing.TB
-	name string
-	cmd  *exec.Cmd
-	out  *syncBuffer
-	done chan struct{}
+	t     testing.TB
+	name  string
+	cmd   *exec.Cmd
+	out   *syncBuffer
+	done  chan struct{}
+	stdin io.WriteCloser
 }
 
 // start launches a binary and registers cleanup that kills it and fails the
 // test if the process reported a data race.
 func start(t testing.TB, name string, env []string, args ...string) *proc {
 	t.Helper()
+	return startProc(t, name, env, false, args...)
+}
+
+// startPiped is start with a stdin pipe the test controls, the way
+// `faultline up` holds its children.
+func startPiped(t testing.TB, name string, env []string, args ...string) *proc {
+	t.Helper()
+	return startProc(t, name, env, true, args...)
+}
+
+func startProc(t testing.TB, name string, env []string, piped bool, args ...string) *proc {
+	t.Helper()
 	p := &proc{t: t, name: name, out: &syncBuffer{}, done: make(chan struct{})}
 	p.cmd = exec.Command(bin(name), args...)
 	p.cmd.Env = append(os.Environ(), env...)
+	if piped {
+		in, err := p.cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.stdin = in
+	}
 	p.cmd.Stdout = p.out
 	p.cmd.Stderr = p.out
 	if err := p.cmd.Start(); err != nil {

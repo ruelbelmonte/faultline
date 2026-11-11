@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -142,7 +143,7 @@ func (a *app) shop() http.Handler {
 	health(mux)
 	mux.HandleFunc("GET /api/orders/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var s stock
-		if err := a.call(r, a.opts.Proxy+"/inventory/stock/"+r.PathValue("id"), &s); err != nil {
+		if err := a.call(r, a.opts.Proxy+"/inventory/stock/"+url.PathEscape(r.PathValue("id")), &s); err != nil {
 			a.log.Warn("shop: inventory call failed", "error", err.Error())
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "upstream"})
 			return
@@ -157,7 +158,7 @@ func (a *app) inventory() http.Handler {
 	health(mux)
 	mux.HandleFunc("GET /stock/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var p price
-		if err := a.call(r, a.opts.Proxy+"/pricing/price/"+r.PathValue("id"), &p); err != nil {
+		if err := a.call(r, a.opts.Proxy+"/pricing/price/"+url.PathEscape(r.PathValue("id")), &p); err != nil {
 			a.log.Warn("inventory: pricing call failed", "error", err.Error())
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "upstream"})
 			return
@@ -177,7 +178,7 @@ func (a *app) pricing() http.Handler {
 }
 
 // call performs a downstream GET with the retry behaviour of the current mode.
-func (a *app) call(in *http.Request, url string, out any) error {
+func (a *app) call(in *http.Request, target string, out any) error {
 	var lastErr error
 	wait := time.Duration(0)
 	for attempt := 1; attempt <= a.res.attempts; attempt++ {
@@ -190,7 +191,7 @@ func (a *app) call(in *http.Request, url string, out any) error {
 		}
 		wait = a.res.backoff
 
-		req, err := http.NewRequestWithContext(in.Context(), http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(in.Context(), http.MethodGet, target, nil)
 		if err != nil {
 			return err
 		}

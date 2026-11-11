@@ -375,6 +375,17 @@ faults:
       status: 503
       headers: {*k : session=s3cr3t-value}
 `,
+		"binary tagged key in params": `version: 1
+name: binarykey
+target: {route: inventory}
+duration: 5s
+faults:
+  - id: f1
+    type: http_error
+    params:
+      status: 503
+      headers: {!!binary U2V0LUNvb2tpZQ==: session=s3cr3t-value}
+`,
 	}
 	for name, doc := range docs {
 		t.Run(name, func(t *testing.T) {

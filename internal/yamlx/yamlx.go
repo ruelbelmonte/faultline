@@ -74,12 +74,13 @@ func rejectIndirection(n *yaml.Node, path string, errs *Errors) {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
-			if k.Kind != yaml.ScalarNode {
-				errs.Add(path, "mapping keys must be plain scalars")
+			if k.Kind == yaml.ScalarNode && (k.ShortTag() == "!!merge" || k.Value == "<<") {
+				errs.Add(join(path, k.Value), "YAML merge keys are not supported")
 				continue
 			}
-			if k.ShortTag() == "!!merge" || k.Value == "<<" {
-				errs.Add(join(path, k.Value), "YAML merge keys are not supported")
+			// A tagged key such as !!binary decodes to a different string than it shows.
+			if k.Kind != yaml.ScalarNode || k.ShortTag() != "!!str" {
+				errs.Add(path, "mapping keys must be plain strings")
 				continue
 			}
 			rejectIndirection(v, join(path, k.Value), errs)

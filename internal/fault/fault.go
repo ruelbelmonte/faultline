@@ -311,3 +311,78 @@ func (m Match) Matches(method, path string) bool {
 	}
 	return m.Path == "" || Glob(m.Path, path)
 }
+
+// Install is one fault as sent to the proxy: a Spec plus its absolute window.
+type Install struct {
+	Spec
+	StartAt *time.Time `json:"start_at"`
+	EndAt   *time.Time `json:"end_at"`
+}
+
+// RuleSet is the body of PUT /admin/v1/faults.
+type RuleSet struct {
+	RunID     string    `json:"run_id"`
+	ScopeMode string    `json:"scope_mode"`
+	LeaseID   string    `json:"lease_id"`
+	Seed      *int64    `json:"seed,omitempty"`
+	Faults    []Install `json:"faults"`
+}
+
+// Active is the body of GET /admin/v1/faults/active.
+type Active struct {
+	RunID   *string       `json:"run_id"`
+	LeaseID string        `json:"lease_id,omitempty"`
+	Faults  []ActiveFault `json:"faults"`
+}
+
+type ActiveFault struct {
+	ID       string    `json:"id"`
+	Type     string    `json:"type"`
+	Route    string    `json:"route"`
+	StartAt  time.Time `json:"start_at"`
+	EndAt    time.Time `json:"end_at"`
+	Triggers int64     `json:"triggers"`
+}
+
+// Record is one proxied request observed during an active run.
+type Record struct {
+	Seq          int64     `json:"seq"`
+	TS           time.Time `json:"ts"`
+	Route        string    `json:"route"`
+	Method       string    `json:"method"`
+	Path         string    `json:"path"`
+	Status       int       `json:"status"`
+	DurationMs   float64   `json:"duration_ms"`
+	Scoped       bool      `json:"scoped"`
+	Correlation  string    `json:"correlation"`
+	FaultID      *string   `json:"fault_id"`
+	FaultType    *string   `json:"fault_type"`
+	RetryAfter   *int      `json:"retry_after"`
+	ClientHeldMs *float64  `json:"client_held_ms"`
+}
+
+type RecordPage struct {
+	Records []Record `json:"records"`
+	Next    int64    `json:"next"`
+}
+
+type RouteCounters struct {
+	Requests int64 `json:"requests"`
+	Faulted  int64 `json:"faulted"`
+}
+
+type Event struct {
+	TS    time.Time `json:"ts"`
+	Type  string    `json:"type"`
+	RunID string    `json:"run_id"`
+}
+
+// Stats is the body of GET /admin/v1/stats. Routes count every request since
+// the proxy started; Faults holds triggers of the current or most recent run.
+type Stats struct {
+	RunID  *string                  `json:"run_id"`
+	Active bool                     `json:"active"`
+	Routes map[string]RouteCounters `json:"routes"`
+	Faults map[string]int64         `json:"faults"`
+	Events []Event                  `json:"events"`
+}

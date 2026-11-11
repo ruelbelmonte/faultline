@@ -116,6 +116,18 @@ func TestDemoChainAndHeaderForwarding(t *testing.T) {
 	}
 }
 
+func TestDemoEscapesIDInDownstreamPath(t *testing.T) {
+	stub := newStub(t, func(_ int, w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"id":"x","stock":42,"price":9.99}`))
+	})
+	d := startDemo(t, "naive", stub.URL)
+	get(t, "http://"+d.shop+"/api/orders/..%2F..%2Fadmin%3Fx=1", nil)
+	_, _, paths := stub.snapshot()
+	if len(paths) != 1 || paths[0] != "/inventory/stock/../../admin?x=1" {
+		t.Fatalf("the id must stay one escaped path segment, upstream saw %v", paths)
+	}
+}
+
 func TestDemoCustomHeaderNames(t *testing.T) {
 	stub := newStub(t, func(_ int, w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"id":"1","stock":42,"price":9.99}`))
