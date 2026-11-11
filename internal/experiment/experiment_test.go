@@ -333,8 +333,11 @@ func TestRedactLeavesCleanDocumentUntouched(t *testing.T) {
 	}
 }
 
-func TestRedactFollowsAliases(t *testing.T) {
-	doc := `version: 1
+// Aliases and merge keys could place a sensitive header where redaction of
+// the raw document would not see it, so both validation and redaction refuse them.
+func TestIndirectionIsRejectedAndNeverStored(t *testing.T) {
+	docs := map[string]string{
+		"alias value": `version: 1
 name: alias
 description: &tok Bearer s3cr3t-value
 target: {route: inventory}
@@ -347,9 +350,43 @@ traffic:
       headers: {Authorization: *tok}
 faults:
   - {id: f1, type: reset}
-`
-	out := string(Redact([]byte(doc), []string{"authorization"}))
-	if strings.Contains(out, "s3cr3t") {
-		t.Fatalf("secret reachable through an alias survived redaction:\n%s", out)
+`,
+		"merge key in params": `version: 1
+name: merge
+target: {route: inventory}
+duration: 5s
+faults:
+  - id: f1
+    type: http_error
+    params:
+      status: 503
+      headers:
+        <<: {Set-Cookie: session=s3cr3t-value}
+`,
+		"alias key in params": `version: 1
+name: aliaskey
+description: &k Set-Cookie
+target: {route: inventory}
+duration: 5s
+faults:
+  - id: f1
+    type: http_error
+    params:
+      status: 503
+      headers: {*k : session=s3cr3t-value}
+`,
+	}
+	for name, doc := range docs {
+		t.Run(name, func(t *testing.T) {
+			if _, errs := Parse([]byte(doc), testConfig()); len(errs) == 0 {
+				t.Fatal("expected a validation error")
+			}
+			if out := string(Redact([]byte(doc), testConfig().RedactionHeaders)); strings.Contains(out, "s3cr3t") {
+				t.Fatalf("secret survived redaction:\n%s", out)
+			}
+		})
+	}
+	if out := string(Redact([]byte("name: [unclosed s3cr3t"), nil)); strings.Contains(out, "s3cr3t") {
+		t.Fatalf("an unparseable document must not be stored as is: %s", out)
 	}
 }

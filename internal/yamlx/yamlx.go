@@ -50,7 +50,45 @@ func Parse(data []byte, errs *Errors) *Map {
 		errs.Add("", "document is empty")
 		return nil
 	}
+	before := len(*errs)
+	rejectIndirection(doc.Content[0], "", errs)
+	if len(*errs) > before {
+		return nil
+	}
 	return newMap(doc.Content[0], "", errs)
+}
+
+// HasIndirection reports whether a tree uses aliases or merge keys.
+func HasIndirection(n *yaml.Node) bool {
+	var errs Errors
+	rejectIndirection(n, "", &errs)
+	return len(errs) > 0
+}
+
+// Aliases and merge keys are refused outright: they let one value appear under
+// another key after decoding, which redaction of the stored copy could miss.
+func rejectIndirection(n *yaml.Node, path string, errs *Errors) {
+	switch n.Kind {
+	case yaml.AliasNode:
+		errs.Add(path, "YAML aliases are not supported")
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if k.Kind != yaml.ScalarNode {
+				errs.Add(path, "mapping keys must be plain scalars")
+				continue
+			}
+			if k.ShortTag() == "!!merge" || k.Value == "<<" {
+				errs.Add(join(path, k.Value), "YAML merge keys are not supported")
+				continue
+			}
+			rejectIndirection(v, join(path, k.Value), errs)
+		}
+	case yaml.SequenceNode:
+		for i, c := range n.Content {
+			rejectIndirection(c, fmt.Sprintf("%s[%d]", path, i), errs)
+		}
+	}
 }
 
 func newMap(n *yaml.Node, path string, errs *Errors) *Map {

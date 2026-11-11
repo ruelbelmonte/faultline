@@ -47,7 +47,10 @@ Alternative: `path.Match`, where `*` stops at `/`. Reason: `/stock/*` reads as "
 
 ## Redaction
 
-**D12. The persisted experiment copy is redacted in place.** Header values under `traffic.requests[].headers` and `faults[].params.headers` whose name is in `redaction.headers` become `[REDACTED]`. If nothing needed redacting the stored bytes are identical to what was submitted. If the header value is a YAML alias, the anchored value is redacted too.
+**D12. The persisted experiment copy is redacted in place.** Header values under `traffic.requests[].headers` and `faults[].params.headers` whose name is in `redaction.headers` become `[REDACTED]`. If nothing needed redacting the stored bytes are identical to what was submitted.
+
+**D12a. YAML aliases and merge keys are a validation error in config and experiment files.**
+Alternative: resolve them before redacting. Reason: they let a value appear under a different key after decoding than in the raw document, so redaction of the stored copy could miss a sensitive header (found by security review of M0). Rejecting them keeps "what is validated" and "what is redacted" the same tree. `Redact` also fails closed: a document that does not parse or contains either construct is stored as a placeholder comment.
 
 **D13. `yaml_sha256` is the hash of the persisted (redacted) copy.**
 Alternative: hash of the submitted bytes. Reason: a hash of a document containing a low-entropy secret can be brute-forced; hashing the redacted copy cannot leak it. For experiments without sensitive headers the hash equals `sha256sum` of the file.
