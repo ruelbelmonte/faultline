@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+
+FROM golang:1.27 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/faultline-demo/ cmd/faultline-demo/
+COPY internal/demo/ internal/demo/
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/faultline-demo ./cmd/faultline-demo
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/faultline-demo /faultline-demo
+USER nonroot
+EXPOSE 9000 9001 9002 9003
+ENTRYPOINT ["/faultline-demo"]

@@ -1,0 +1,9 @@
+.git
+.tools
+bin
+faultline-acceptance
+**/node_modules
+ui/test-results
+ui/playwright-report
+ui/e2e/.work
+**/.faultline

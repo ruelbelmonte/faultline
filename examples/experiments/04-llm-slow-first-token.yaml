@@ -1,0 +1,47 @@
+# The LLM answers, but the first token takes 400 ms longer than usual.
+# The driver calls the LLM route on the proxy directly, standing in for an
+# application that streams completions.
+# Expected: passed.
+version: 1
+name: llm-slow-first-token
+description: Streaming completions start 400 ms late
+target:
+  route: llm
+duration: 10s
+
+traffic:
+  base_url: http://proxy:7701
+  rps: 4
+  concurrency: 8
+  timeout: 30s
+  requests:
+    - method: POST
+      path: /llm/v1/messages
+      headers:
+        Content-Type: application/json
+      body: '{"model":"demo-model","max_tokens":128,"stream":true,"messages":[{"role":"user","content":"Say something synthetic."}]}'
+
+steady_state:
+  precheck:
+    consecutive_ok: 3
+    timeout: 15s
+  probes:
+    - name: llm-health
+      url: http://demo:9003/health
+      interval: 1s
+  hypothesis:
+    error_rate_max: 0.01
+    p95_latency_ms_max: 3000
+    probe_success_min: 0.95
+
+recovery:
+  timeout: 30s
+
+faults:
+  - id: slow-start
+    type: llm_slow_first_token
+    match:
+      method: POST
+      path: /v1/messages
+    params:
+      delay_ms: 400

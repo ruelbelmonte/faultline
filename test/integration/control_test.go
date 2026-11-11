@@ -1155,3 +1155,20 @@ func TestStructuredLogs(t *testing.T) {
 		t.Fatalf("unknown log format: expected exit 2, got %d", code)
 	}
 }
+
+// A proxy that restarts comes back with no faults. The run must not carry on
+// and report a verdict about faults that are no longer there.
+func TestProxyRestartAbortsRunWithLeaseLost(t *testing.T) {
+	f := startFull(t, "naive", func(s *stack) { s.leaseTimeout = "2s" })
+	id := f.control.createRun(t, longRun(f, t, expOpts{Name: "proxy-restart"}))
+	f.control.waitStatus(t, id, 15*time.Second, "injecting")
+	eventually(t, 5*time.Second, "fault active", func() bool { return f.faultedThroughProxy(id) })
+
+	f.proxy.kill()
+	f.proxy = f.s.startProxy(t)
+	if f.faultedThroughProxy(id) {
+		t.Fatal("a restarted proxy must start with no faults")
+	}
+	f.control.waitStatus(t, id, 15*time.Second, "aborted")
+	assertAborted(t, f, id, "lease_lost")
+}

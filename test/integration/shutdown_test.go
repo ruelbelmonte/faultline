@@ -20,7 +20,7 @@ func TestProxyStopsWhenParentPipeCloses(t *testing.T) {
 	p.install(t, testRun, "header", flt("hold", "timeout", "svc", obj{"hold": "30s"}))
 	held := make(chan time.Duration, 1)
 	go func() {
-		_, _, took := raw(t, s.trafficAddr, rawGet("/svc/x", testRun))
+		_, took, _ := raw(t, s.trafficAddr, rawGet("/svc/x", testRun))
 		held <- took
 	}()
 	time.Sleep(300 * time.Millisecond)

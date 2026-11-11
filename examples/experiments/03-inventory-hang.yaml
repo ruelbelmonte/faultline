@@ -1,0 +1,44 @@
+# Inventory accepts the connection and then says nothing for 3 seconds.
+# Expected against the naive demo: failed (p95 latency), with finding
+# missing_timeout: the shop has no timeout of its own and waits out the hold.
+# Against the good demo the shop gives up after 1 second, so missing_timeout
+# is not reported.
+version: 1
+name: inventory-hang
+description: Inventory holds every call open for 3 seconds without answering
+target:
+  route: inventory
+duration: 10s
+
+traffic:
+  base_url: http://demo:9000
+  rps: 5
+  concurrency: 8
+  timeout: 30s
+  requests:
+    - method: GET
+      path: /api/orders/1
+
+steady_state:
+  precheck:
+    consecutive_ok: 3
+    timeout: 15s
+  probes:
+    - name: shop-health
+      url: http://demo:9000/health
+      interval: 1s
+  hypothesis:
+    p95_latency_ms_max: 1500
+    probe_success_min: 0.95
+
+recovery:
+  timeout: 30s
+
+faults:
+  - id: hang
+    type: timeout
+    match:
+      method: GET
+      path: /stock/*
+    params:
+      hold: 3s

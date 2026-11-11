@@ -19,7 +19,7 @@ import (
 
 // raw sends a request over a bare TCP connection and reads until the peer
 // closes or resets, so the test sees exactly what happened on the wire.
-func raw(t testing.TB, addr, request string) (data []byte, err error, took time.Duration) {
+func raw(t testing.TB, addr, request string) (data []byte, took time.Duration, err error) {
 	t.Helper()
 	conn, dialErr := net.Dial("tcp", addr)
 	if dialErr != nil {
@@ -28,11 +28,11 @@ func raw(t testing.TB, addr, request string) (data []byte, err error, took time.
 	defer conn.Close()
 	begin := time.Now()
 	if _, err := conn.Write([]byte(request)); err != nil {
-		return nil, err, time.Since(begin)
+		return nil, time.Since(begin), err
 	}
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	data, err = io.ReadAll(conn)
-	return data, err, time.Since(begin)
+	return data, time.Since(begin), err
 }
 
 func rawGet(path, runID string) string {
@@ -80,7 +80,7 @@ func TestProxyRouting(t *testing.T) {
 	})
 
 	t.Run("does not add a User-Agent", func(t *testing.T) {
-		data, err, _ := raw(t, p.s.trafficAddr, "GET /svc/ua HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+		data, _, err := raw(t, p.s.trafficAddr, "GET /svc/ua HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -383,7 +383,7 @@ func TestFaultTimeout(t *testing.T) {
 	before := up.hits.Load()
 
 	t.Run("holds, then closes with no response", func(t *testing.T) {
-		data, err, took := raw(t, p.s.trafficAddr, rawGet("/svc/x", testRun))
+		data, took, err := raw(t, p.s.trafficAddr, rawGet("/svc/x", testRun))
 		if len(data) != 0 {
 			t.Fatalf("nothing may be sent during a hold, got %q", data)
 		}
@@ -425,7 +425,7 @@ func TestFaultTimeout(t *testing.T) {
 		p.install(t, testRun, "header", flt("t2", "timeout", "svc", obj{}))
 		done := make(chan time.Duration, 1)
 		go func() {
-			_, _, took := raw(t, p.s.trafficAddr, rawGet("/svc/x", testRun))
+			_, took, _ := raw(t, p.s.trafficAddr, rawGet("/svc/x", testRun))
 			done <- took
 		}()
 		select {
@@ -446,7 +446,7 @@ func TestFaultReset(t *testing.T) {
 	p, up := startEchoProxy(t)
 	p.install(t, testRun, "header", flt("r1", "reset", "svc", obj{}))
 	before := up.hits.Load()
-	data, err, took := raw(t, p.s.trafficAddr, rawGet("/svc/x", testRun))
+	data, took, err := raw(t, p.s.trafficAddr, rawGet("/svc/x", testRun))
 	if len(data) != 0 {
 		t.Fatalf("a reset must not send a response, got %q", data)
 	}
@@ -800,7 +800,7 @@ func TestLeaseExpiryClearsAllFaults(t *testing.T) {
 	// The admin client stops renewing. An in-flight hold must be released too.
 	held := make(chan time.Duration, 1)
 	go func() {
-		data, _, took := raw(t, p.s.trafficAddr, rawGet("/svc/hold", testRun))
+		data, took, _ := raw(t, p.s.trafficAddr, rawGet("/svc/hold", testRun))
 		if len(data) != 0 {
 			t.Errorf("the held request got a response: %q", data)
 		}

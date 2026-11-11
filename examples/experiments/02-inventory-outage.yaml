@@ -1,0 +1,45 @@
+# Inventory is down and asks callers to come back in a second.
+# Expected against the naive demo: failed, with findings steady_state_breach,
+# retry_amplification, retry_without_backoff and retry_after_ignored.
+# Against the good demo (DEMO_MODE=good) it still fails, because orders cannot
+# succeed without inventory, but the three retry findings are gone.
+version: 1
+name: inventory-outage
+description: Inventory returns 503 with Retry-After for every call
+target:
+  route: inventory
+duration: 10s
+
+traffic:
+  base_url: http://demo:9000
+  rps: 10
+  concurrency: 8
+  timeout: 30s
+  requests:
+    - method: GET
+      path: /api/orders/1
+
+steady_state:
+  precheck:
+    consecutive_ok: 3
+    timeout: 15s
+  probes:
+    - name: shop-health
+      url: http://demo:9000/health
+      interval: 1s
+  hypothesis:
+    error_rate_max: 0.05
+    probe_success_min: 0.95
+
+recovery:
+  timeout: 30s
+
+faults:
+  - id: outage
+    type: http_error
+    match:
+      method: GET
+      path: /stock/*
+    params:
+      status: 503
+      retry_after: 1

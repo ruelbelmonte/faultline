@@ -1,0 +1,59 @@
+# Demo system + Faultline proxy + Faultline control plane, each in its own
+# container. Synthetic data only.
+#
+#   export FAULTLINE_TOKEN=$(openssl rand -hex 32)
+#   export FAULTLINE_ADMIN_TOKEN=$(openssl rand -hex 32)
+#   docker compose -f examples/docker-compose.yaml up --build -d
+#   faultline run examples/experiments/ --fail-on-breach
+#
+# Set DEMO_MODE=good to run the demo with timeouts, backoff and Retry-After handling.
+name: faultline-example
+
+services:
+  demo:
+    build:
+      context: ..
+      dockerfile: Dockerfile.demo
+    command:
+      - --mode=${DEMO_MODE:-naive}
+      - --proxy=http://proxy:7701
+      - --shop=0.0.0.0:9000
+      - --inventory=0.0.0.0:9001
+      - --pricing=0.0.0.0:9002
+      - --llm=0.0.0.0:9003
+    ports:
+      - "127.0.0.1:9000:9000"
+
+  proxy:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["proxy", "--config", "/etc/faultline/faultline.yaml", "--log-format", "json"]
+    environment:
+      FAULTLINE_ADMIN_TOKEN: ${FAULTLINE_ADMIN_TOKEN:?set FAULTLINE_ADMIN_TOKEN to at least 16 characters}
+    volumes:
+      - ./faultline.yaml:/etc/faultline/faultline.yaml:ro
+    ports:
+      # Traffic port only. The admin port stays on the compose network.
+      - "127.0.0.1:7701:7701"
+
+  control:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["control", "--config", "/etc/faultline/faultline.yaml", "--log-format", "json"]
+    environment:
+      FAULTLINE_TOKEN: ${FAULTLINE_TOKEN:?set FAULTLINE_TOKEN to at least 16 characters}
+      FAULTLINE_ADMIN_TOKEN: ${FAULTLINE_ADMIN_TOKEN:?set FAULTLINE_ADMIN_TOKEN to at least 16 characters}
+    volumes:
+      - ./faultline.yaml:/etc/faultline/faultline.yaml:ro
+      - ./experiments:/experiments:ro
+      - faultline-data:/data
+    ports:
+      - "127.0.0.1:7700:7700"
+    depends_on:
+      - proxy
+      - demo
+
+volumes:
+  faultline-data: {}

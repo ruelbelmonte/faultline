@@ -188,3 +188,19 @@ Alternative: hash of the submitted bytes. Reason: a hash of a document containin
 ## Control plane (addendum)
 
 **D72. The `run_aborted` audit entry is written before the aborted status becomes visible through the API.** Found by the Linux race run: a client that saw `aborted` could read the audit log before the entry existed.
+
+## Packaging and docs
+
+**D73. `examples/experiments/` holds four experiments with documented results against the naive demo: passed, failed, failed, passed.** `faultline run examples/experiments/ --fail-on-breach` therefore exits 10, and the README says so. Alternative: only passing examples. Reason: the failing ones are what show the findings; an example set that cannot fail teaches nothing.
+
+**D74. Images are `gcr.io/distroless/static-debian12:nonroot`.** The data directory `/data` is created in the build stage and copied with nonroot ownership, because the runtime image has no shell and a named volume inherits the ownership of the image's directory.
+
+**D75. The compose example publishes ports on `127.0.0.1` only, and never the proxy admin port.** The example config binds the listeners to `0.0.0.0` inside the containers, which the default `127.0.0.1` would not allow other containers to reach.
+
+**D76. The example experiments directory is mounted read-only in compose**, so saving from the dashboard fails there. The container runs as a non-root user that could not write to a host directory anyway.
+
+**D77. CI rebuilds the dashboard and fails if `internal/ui/dist` differs from what is committed.** The build was checked to be byte-identical between Windows and Linux (`node:22-alpine`) with the committed lockfile.
+
+**D78. LICENSE copyright holder is "Faultline contributors".** The PRD names MIT but no legal entity.
+
+**D79. `make lint` is `go vet`, a `gofmt` check and `staticcheck` (pinned, run with `go run`).** No linter is added as a module dependency.

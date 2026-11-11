@@ -1,0 +1,40 @@
+# Configuration for examples/docker-compose.yaml. Service names (demo, proxy)
+# resolve on the compose network.
+version: 1
+environment: local
+data_dir: /data
+experiments_dir: /experiments
+
+proxy:
+  # Inside a container the listeners must accept connections from other
+  # containers. Compose publishes only what the host needs, on 127.0.0.1.
+  listen: 0.0.0.0:7701
+  admin_listen: 0.0.0.0:7702
+  lease_timeout: 10s
+  expose_fault_header: true
+
+control:
+  listen: 0.0.0.0:7700
+  proxy_admin_url: http://proxy:7702
+  max_experiment_duration: 15m
+  allow_unscoped: false
+
+scope:
+  header: X-Chaos-Run
+correlation:
+  header: X-Chaos-Correlation
+
+redaction:
+  headers: [authorization, proxy-authorization, x-api-key, cookie, set-cookie]
+  store_bodies: false
+
+findings:
+  retry_amplification_threshold: 3.0
+
+routes:
+  - name: inventory
+    upstream: http://demo:9001
+  - name: pricing
+    upstream: http://demo:9002
+  - name: llm
+    upstream: http://demo:9003

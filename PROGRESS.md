@@ -174,3 +174,29 @@ Known gaps:
 - The Playwright test has only been run on Windows with Chromium. Firefox and WebKit are not covered.
 - Accessibility was built in (labels, focus order, dialog semantics, non-colour signals) and one keyboard path is tested, but no screen reader or automated accessibility audit was run.
 - An experiment with a sensitive header cannot be run from the UI editor with its real value (D38).
+
+## M7: packaging and docs
+
+Built: `Makefile` (build, ui, test, test-integration, test-race, test-ui, lint, demo, docker, clean), `Dockerfile`, `Dockerfile.demo`, `.dockerignore`, `examples/` (compose file, config, four experiments, Terraform snippet), `docs/` (architecture, experiments, faults, qa-deployment), `README.md`, `LICENSE`, `.github/workflows/ci.yaml`.
+
+| Check | Where | Result |
+|---|---|---|
+| `make build test test-integration lint` from a copy without build outputs | Linux container (`golang:1.27`) | all four targets succeed; integration 203s; staticcheck clean |
+| `docker build` for both images | Docker Desktop | ok; `faultline` 28.2 MB, `faultline-demo` 16.6 MB |
+| `docker compose -f examples/docker-compose.yaml up --build -d` | Docker Desktop | demo, proxy, control running; only 7700, 7701, 9000 published, on 127.0.0.1 |
+| `faultline run examples/experiments/ --fail-on-breach` against compose | Windows CLI | passed, failed, failed, passed; exit code 10, as documented in the README |
+| README quickstart, run exactly as written | Git Bash on Windows | verdict passed, exit 0, dashboard answers, `kill %1 %2` stops everything |
+| Cross-compile linux, darwin, windows for amd64 and arm64 | Windows | ok for all six |
+| Dashboard build reproducible | Windows vs `node:22-alpine` | identical file hashes |
+| `go test ./...` | Windows | 133 pass, 0 fail, 0 skip |
+
+Gate: Dockerfiles build; compose brings up demo + proxy + control and an example experiment passes via `faultline run` (`01-inventory-flaky` and `04-llm-slow-first-token` pass; the other two fail by design); README quickstart works verbatim; the GitHub Actions workflow runs lint, unit, integration and race tests. **Green, with the caveats below.**
+
+Added while documenting: `TestProxyRestartAbortsRunWithLeaseLost`, because the QA guide states that behaviour.
+
+Known gaps:
+
+- **The GitHub Actions workflow has never run.** There is no remote. Every command in it was run by hand locally except the macOS integration job and `npx playwright install --with-deps`.
+- **macOS is untested.** The code cross-compiles for darwin and has no platform-specific code beyond the Unix shell helper, but no test has run there.
+- `make` targets were run in a Linux container. `make` is not installed on the Windows build machine, where the equivalent `go` commands were used.
+- The README quickstart was run in Git Bash on Windows. It was not run on Linux or macOS, though each command in it has been run on Linux inside containers.

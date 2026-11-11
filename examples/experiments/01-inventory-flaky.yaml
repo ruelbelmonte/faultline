@@ -1,0 +1,53 @@
+# 30% of inventory calls fail. The shop retries, so orders should keep working.
+# Expected against the naive demo: passed.
+version: 1
+name: inventory-flaky
+description: Inventory returns 503 for 30% of calls; orders should still succeed
+seed: 42
+target:
+  route: inventory
+scope: header
+duration: 10s
+
+traffic:
+  base_url: http://demo:9000
+  rps: 20
+  concurrency: 4
+  timeout: 30s
+  requests:
+    - method: GET
+      path: /api/orders/1
+
+steady_state:
+  precheck:
+    consecutive_ok: 3
+    timeout: 15s
+  probes:
+    - name: shop-health
+      url: http://demo:9000/health
+      interval: 1s
+      timeout: 2s
+      expect_status: 200
+  hypothesis:
+    error_rate_max: 0.05
+    p95_latency_ms_max: 1500
+    probe_success_min: 0.95
+
+abort:
+  error_rate_max: 0.5
+  probe_failures_consecutive: 5
+
+recovery:
+  timeout: 30s
+
+faults:
+  - id: flaky
+    type: http_error
+    match:
+      method: GET
+      path: /stock/*
+    strategy:
+      kind: probability
+      p: 0.3
+    params:
+      status: 503
