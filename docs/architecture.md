@@ -39,7 +39,7 @@ Faultline has three runtime pieces. The proxy and the control plane are separate
 
 **Connection-level faults.** `reset`, `timeout` and the two cut faults take the connection away from the HTTP server. `reset` closes with linger 0, which sends a TCP RST. Cuts and holds flush what was sent and close normally, so the client sees exactly the forwarded bytes followed by an unexpected end.
 
-**Request records.** While a rule set is installed, every request on a route is recorded in a bounded in-memory ring (200,000 entries): route, method, path without query string, status, duration, whether it carried the run id, correlation id, fault id and type, the `Retry-After` the proxy sent, and for holds how long the client stayed connected. No header values, no bodies. Path, correlation id and method are length-capped.
+**Request records.** While a rule set is installed, every request on a route is recorded in a bounded in-memory ring (200,000 entries): route, method, path without query string, status, duration, whether it carried the run id, correlation id, fault id and type, the `Retry-After` the proxy sent, and for holds how long the client stayed connected. No header values, no bodies. Path, correlation id and method are length-capped. Control reads the ring every second during injection; if the ring ever wraps before a record was read, the proxy logs a warning naming the run, because that run's findings are then based on incomplete records.
 
 ### Fault lifetime
 
@@ -93,7 +93,7 @@ Everything lives under `data_dir`:
 | `audit.jsonl` | The audit log again, one JSON object per line, append-only |
 | `reports/{run_id}/` | `report.json`, `report.md`, `report.html`, `report.xml` |
 
-Request records are held in memory for the duration of a run and are not stored. The experiment is redacted before it is stored; the unredacted text exists only in the memory of the running control process.
+While a run is active, control keeps the part of each of its request records that the finding rules read (time, route, duration, fault id, Retry-After, hold time, and a salted hash in place of the correlation id) in `faultline.db`, so the evidence for findings does not have to fit in memory. Those rows are deleted as soon as the run's findings are computed, and at the next start if control was killed first. Method, path and status are not stored, and the correlation id itself never reaches the disk. The experiment is redacted before it is stored; the unredacted text exists only in the memory of the running control process.
 
 ### Control API (port 7700, `Authorization: Bearer $FAULTLINE_TOKEN`)
 

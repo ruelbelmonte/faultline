@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"faultline/internal/config"
@@ -37,6 +38,8 @@ type Proxy struct {
 	transport http.RoundTripper
 	tlsConfig *tls.Config
 	log       *slog.Logger
+
+	lossWarned atomic.Pointer[string]
 }
 
 func New(cfg *config.Config, log *slog.Logger) (*Proxy, error) {
@@ -160,7 +163,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if d.rule != nil {
 		rec.FaultID, rec.FaultType = &d.rule.spec.ID, &d.rule.spec.Type
 	}
-	p.records.add(d.rs.runID, rec)
+	if p.records.add(d.rs.runID, rec) {
+		p.warnRecordsLost(d.rs.runID)
+	}
+}
+
+// warnRecordsLost logs, once per run, that the record ring wrapped before the
+// control plane read it.
+func (p *Proxy) warnRecordsLost(runID string) {
+	if prev := p.lossWarned.Swap(&runID); prev == nil || *prev != runID {
+		p.log.Warn("request records were overwritten before they were read; findings for this run will be based on incomplete records",
+			"run_id", runID, "ring_size", p.records.size)
+	}
 }
 
 func ms(d time.Duration) float64 {

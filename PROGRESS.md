@@ -261,6 +261,66 @@ Known gaps:
 - Normalised, not preserved: whitespace around header values, line endings, and the chunk boundaries of a chunked request body.
 - `https` upstreams no longer use HTTP/2.
 
+## Work item 3: limits and load
+
+Built:
+
+- The record ring size stays fixed: the config contract does not allow a new key (D81).
+- Control no longer holds a run's request records in memory. Each page read from the proxy goes to a `records` table in SQLite, the finding rules read it back grouped by route and correlation (`findings.Evidence`, `internal/control/records.go`), and the rows are deleted once the findings exist (D82). Only what the rules read is written; the correlation id is replaced by a salted hash.
+- The proxy logs a warning when its ring overwrites a record that was never read (D83).
+- `TestLoadProxyOverhead` behind the build tag `load`, and `make test-load` (D84).
+
+| Command | Where | Result |
+|---|---|---|
+| `go vet ./... && go vet -tags "integration load" ./test/...`, `gofmt -l cmd internal test` | Windows | clean |
+| `go test ./... -count=1` | Windows | 143 pass, 0 fail, 0 skip |
+| `go test -tags integration ./test/integration/ -count=1 -timeout 30m` | Windows | 78 top-level tests pass, 0 fail, 0 skip (210s) |
+| `npx playwright test` in `ui/` | Windows, Chromium | 7 pass |
+| `sh .tools/race.sh "make lint && make test-race"` | Linux container | lint clean (now also vets and staticchecks the `load` tag); unit and integration ok with `-race` (241s) |
+| compose example, `faultline run examples/experiments/ --fail-on-breach` | Docker Desktop | passed, failed, failed, passed; exit 10 |
+| acceptance suite | Windows | 56 passed, 0 failed, 0 skipped |
+| `go test -tags "integration load" ./test/integration/ -run TestLoad -count=1 -v` | Windows | pass, numbers below |
+| `sh .tools/race.sh "make test-load"` | Linux container | pass, numbers below |
+
+Gate: `TestStoredEvidenceGivesTheSameFindingsAsMemory` (five generated runs of 3,000 records give identical findings from disk and from memory), `TestStoredRecordsHoldNoCorrelationIDsAndAreDeleted` (no correlation id in any file under the data directory; rows deleted per run and at restart), `TestRingReportsOverwritingUnreadRecords`, and the existing end-to-end finding tests (`TestFindingsNaiveVersusGood`, `TestFindingsFromVerdictRules`), which now go through the stored records. **Green.**
+
+### Load test numbers
+
+Closed loop, keep-alive connections, 5 s per row, in-process upstream returning 34 bytes of JSON, all on one machine over loopback. "Active run" is a real control run whose fault never matches: every request is matched, recorded, collected and written to SQLite. No request failed, and in every active-run row the run's request count equalled the number of requests sent (no record lost).
+
+Windows 11 host (the clock there ticks at about 0.5 ms, so read the mean, not the percentiles):
+
+| Scenario | Conns | req/s | mean | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| direct to upstream | 1 | 7,798 | 125 µs | 0 | 1.01 ms | 1.51 ms |
+| through proxy, no run | 1 | 2,653 | 373 µs | 523 µs | 561 µs | 1.01 ms |
+| through proxy, active run | 1 | 2,600 | 379 µs | 523 µs | 561 µs | 1.02 ms |
+| direct to upstream | 64 | 80,101 | 776 µs | 542 µs | 2.55 ms | 3.65 ms |
+| through proxy, no run | 64 | 21,892 | 2.89 ms | 2.50 ms | 6.44 ms | 8.66 ms |
+| through proxy, active run | 64 | 23,828 | 2.65 ms | 2.27 ms | 5.75 ms | 7.96 ms |
+
+Linux container (`golang:1.27` under Docker Desktop on the same machine):
+
+| Scenario | Conns | req/s | mean | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| direct to upstream | 1 | 8,537 | 115 µs | 111 µs | 184 µs | 234 µs |
+| through proxy, no run | 1 | 2,591 | 383 µs | 366 µs | 516 µs | 662 µs |
+| through proxy, active run | 1 | 2,535 | 391 µs | 372 µs | 530 µs | 692 µs |
+| direct to upstream | 64 | 77,624 | 820 µs | 643 µs | 2.17 ms | 3.25 ms |
+| through proxy, no run | 64 | 17,568 | 3.64 ms | 3.33 ms | 7.47 ms | 9.74 ms |
+| through proxy, active run | 64 | 16,511 | 3.87 ms | 3.36 ms | 8.63 ms | 12.35 ms |
+
+Reading them: the proxy adds about 0.25 to 0.27 ms to a request on an idle connection, and an active run adds under 0.01 ms on top of that. One proxy process carried 16,000 to 24,000 requests per second here. The difference between "no run" and "active run" at 64 connections is inside the noise between rows (it has opposite signs on the two platforms).
+
+Cost of work item 2, measured by running the same test against commit `2b7d542` on Windows: single-connection mean 355 µs before, 373 µs after; 64-connection throughput without a run 22,998 req/s before, 21,892 after. About 5%.
+
+Known gaps:
+
+- The numbers are from one developer machine with client, proxy and upstream competing for the same cores. They show the order of magnitude, not a capacity figure.
+- One run each; no repeated runs, no confidence intervals. Only small responses over keep-alive connections; no large bodies, no streaming, no TLS upstream.
+- Memory per run still grows with driver traffic (about 50 bytes per driver request) and with the number of retry gaps found (D82).
+- A ring overflow is visible in the proxy log only (D83). It never occurred in any test.
+
 ---
 
 # Final report

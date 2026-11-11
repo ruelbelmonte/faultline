@@ -43,7 +43,20 @@ CREATE TABLE IF NOT EXISTS audit (
 	action TEXT NOT NULL,
 	run_id TEXT NOT NULL,
 	detail TEXT NOT NULL
-);`
+);
+CREATE TABLE IF NOT EXISTS records (
+	run_id         TEXT NOT NULL,
+	seq            INTEGER NOT NULL,
+	ts             INTEGER NOT NULL,
+	route          TEXT NOT NULL,
+	corr           INTEGER,
+	duration_ms    REAL NOT NULL,
+	fault_id       TEXT,
+	retry_after    INTEGER,
+	client_held_ms REAL,
+	PRIMARY KEY (run_id, seq)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS records_attempts ON records (run_id, route, corr, ts, seq);`
 
 // Store persists runs, buckets and the audit log in SQLite, and mirrors the
 // audit log to audit.jsonl. It never receives unredacted experiments.
@@ -64,7 +77,9 @@ func OpenStore(dataDir string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	// Request records only live while their run is being evaluated; whatever
+	// a previous process left behind belongs to no run any more.
+	if _, err := db.Exec(schema + "\nDELETE FROM records;"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialising database: %w", err)
 	}
