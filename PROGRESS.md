@@ -460,7 +460,19 @@ Fix: `handleAbort` treats a run with a terminal status as not active, and answer
 | the same with the fix | Windows | passes |
 | full gate | Windows, Linux container, compose, acceptance suite | green: 156 unit and 95 integration tests pass on Windows, 0 fail, 0 skip; 42 Playwright tests pass; lint clean and unit and integration ok with `-race` on Linux (272s); compose exit 10 as documented; acceptance 56 passed |
 
-Known gaps: the integration test that caught it (`TestRunPassed`) is unchanged and still depends on timing to hit the window; the new unit test is what pins the behaviour. This also weakens one claim made earlier: "CI passed without a single fix" was true of the pull request's runs and not of the repository's whole CI history.
+### A second one, on macOS
+
+The workflow run on `master` after the merge (run 43129665351) failed in `integration (macos-latest)`: `TestRunFailed`, "expected every inventory call faulted with retries: {Requests:310 Faulted:307}". Three requests arrived after the fault window had ended and before control cleared the faults; the proxy correctly did not fault them, but control counted them in `metrics.proxy`. On a fast machine that gap is too short to catch a request, which is why it never showed locally or on the pull request's own macOS runs.
+
+Fix: `metrics.proxy` and the proxy series now count requests that arrived during the injection phase, like the driver metrics; later records are kept for the finding rules only (D100). The test's assertion is unchanged.
+
+| Command | Where | Result |
+|---|---|---|
+| `go test ./internal/control/ -run TestCollectCountsOnlyTheInjectionPhase` without the fix | Windows | fails: 4 requests counted, 2 faulted |
+| the same with the fix | Windows | passes |
+| full gate | Windows, Linux container, compose, acceptance suite | green: 157 unit and 95 integration tests pass on Windows, 0 fail, 0 skip; 42 Playwright tests pass; lint clean and unit and integration ok with `-race` on Linux (272s); compose exit 10 as documented; acceptance 56 passed |
+
+Known gaps: the integration test that caught the first one (`TestRunPassed`) is unchanged and still depends on timing to hit the window; the new unit test is what pins the behaviour. This also weakens one claim made earlier: "CI passed without a single fix" was true of the pull request's runs and not of the repository's whole CI history. Two of the first five workflow runs failed on a timing-dependent defect, one on Windows and one on macOS, and both were real. More of the same kind may exist: the hosted runners are slower and less regular than the machine everything was developed on, and each run is one sample.
 
 ---
 
@@ -573,7 +585,7 @@ Other things worth knowing:
 
 From the first build: redaction could be bypassed with YAML aliases, merge keys and tagged keys; the demo built URLs from an unescaped path value; the garble mask barely depended on the seed; record strings were unbounded; quoted `traffic.command` lines could not work on Windows; `missing_timeout` was hidden by holds cut short at the end of injection; the CLI trusted the run id returned by the server for file paths; the `run_aborted` audit entry appeared after the aborted status.
 
-From the continuation: aborting a run in the moment between its terminal status and its release answered 200 instead of 409 (found by CI on Windows, fixed, D99); the proxy forwarded a `Cache-Control: no-cache` header that Go's server adds to requests carrying only `Pragma: no-cache` (found while making headers exact, fixed); the acceptance suite, the three-browser run and axe found no product defect.
+From the continuation: aborting a run in the moment between its terminal status and its release answered 200 instead of 409 (found by CI on Windows, fixed, D99); requests arriving between the end of the fault window and the clearing of the faults were counted in `metrics.proxy` as unfaulted (found by CI on macOS, fixed, D100); the proxy forwarded a `Cache-Control: no-cache` header that Go's server adds to requests carrying only `Pragma: no-cache` (found while making headers exact, fixed); the acceptance suite, the three-browser run and axe found no product defect.
 
 ## What is left
 
