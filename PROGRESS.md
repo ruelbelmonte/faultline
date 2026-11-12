@@ -379,7 +379,7 @@ Known gaps:
 
 - macOS is covered by the integration job only (real processes on `macos-latest`). The unit, race, UI and docker jobs run on Linux, and nobody has used the dashboard or the README quickstart on a Mac by hand.
 - One run. A timing-sensitive test that passes once on a hosted runner can still flake later.
-- The pull request is open, not merged; merging is the owner's call.
+- Pull request #1 was merged on 2026-11-12.
 
 ## Work item 6: OpenAI format for LLM faults (PRD 8.5 stretch)
 
@@ -446,7 +446,7 @@ Known gaps:
 - No example experiment for MCP was added under `examples/experiments/`, because that directory's documented results (four verdicts, exit code 10) are part of the README and the compose check. The example is in `docs/mcp-faults.md`.
 - The dashboard needed no change (fault types are shown as reported), and no UI test exercises an MCP fault.
 
-## After the merge: abort race found by CI
+## After the merge: two timing defects found by CI
 
 Pull request #1 was merged on 2026-11-12. Looking at the workflow history afterwards showed one failed run, for the first build's commit on `master` (see the correction under work item 5).
 
@@ -471,6 +471,8 @@ Fix: `metrics.proxy` and the proxy series now count requests that arrived during
 | `go test ./internal/control/ -run TestCollectCountsOnlyTheInjectionPhase` without the fix | Windows | fails: 4 requests counted, 2 faulted |
 | the same with the fix | Windows | passes |
 | full gate | Windows, Linux container, compose, acceptance suite | green: 157 unit and 95 integration tests pass on Windows, 0 fail, 0 skip; 42 Playwright tests pass; lint clean and unit and integration ok with `-race` on Linux (272s); compose exit 10 as documented; acceptance 56 passed |
+
+Both fixes went in as pull request #2, merged on 2026-11-12. Its own CI run passed all seven jobs, and so did the run on `master` afterwards (run 43140395443, commit `543ac01`): the first fully green run on `master`, including `integration (windows-latest)` and `integration (macos-latest)`.
 
 Known gaps: the integration test that caught the first one (`TestRunPassed`) is unchanged and still depends on timing to hit the window; the new unit test is what pins the behaviour. This also weakens one claim made earlier: "CI passed without a single fix" was true of the pull request's runs and not of the repository's whole CI history. Two of the first five workflow runs failed on a timing-dependent defect, one on Windows and one on macOS, and both were real. More of the same kind may exist: the hosted runners are slower and less regular than the machine everything was developed on, and each run is one sample.
 
@@ -589,7 +591,7 @@ From the continuation: aborting a run in the moment between its terminal status 
 
 ## What is left
 
-1. **The one thing that needs you:** review and merge the pull request for the abort fix (branch `bugfix/abort-finished-run-race`). Pull request #1 is merged.
+1. Nothing is waiting on a merge: pull requests #1 and #2 are in `master`, and `master` is green in CI. Keep an eye on later CI runs: a failure there is most likely a third timing defect of the kind described under "After the merge".
 2. Response header fidelity, if exact response names matter to a system under test: the request mechanism mirrored (D80).
 3. A real MCP client and a real OpenAI-compatible server through the proxy, to check the two stretch features against something I did not write.
 4. A load test on separate machines, with streams and large bodies, repeated enough to give intervals.
