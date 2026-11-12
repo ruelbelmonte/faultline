@@ -362,7 +362,8 @@ What was done:
 
 - Repository `ruelbelmonte/faultline` created, remote `origin` added. It was private for the first two CI runs and was made public afterwards, at the owner's request, so that Actions minutes are free.
 - A machine-wide pre-push hook refuses direct pushes to `master`. It was not bypassed. `master` was created on GitHub at the first build's last commit (`2b7d542`), and the continuation was pushed as `feature/close-final-report-items` and opened as pull request #1, which is what triggers the workflow.
-- First run of `.github/workflows/ci.yaml` (run 43119795842, on commit `a5b61d9`): **all seven jobs passed, with no change needed.**
+- First run of `.github/workflows/ci.yaml` on the pull request (run 43119795842, on commit `a5b61d9`): all seven jobs passed.
+- **Correction.** Creating `master` at `2b7d542` also started a workflow run for that commit (run 43119782204), which I did not look at when I wrote "no change needed". In it `integration (windows-latest)` failed: `TestRunPassed`, "abort a finished run: expected 409, got 200". That is a real race in the abort endpoint, present since M3 and still present in the continuation's code; the pull request's three runs simply did not hit it. It is fixed in the section "After the merge" below.
 
 | Job | Result |
 |---|---|
@@ -444,6 +445,22 @@ Known gaps:
 - The contract is mine. The PRD names the milestone and nothing else, so there is nothing external it was checked against; the acceptance suite does not cover M8.
 - No example experiment for MCP was added under `examples/experiments/`, because that directory's documented results (four verdicts, exit code 10) are part of the README and the compose check. The example is in `docs/mcp-faults.md`.
 - The dashboard needed no change (fault types are shown as reported), and no UI test exercises an MCP fault.
+
+## After the merge: abort race found by CI
+
+Pull request #1 was merged on 2026-11-12. Looking at the workflow history afterwards showed one failed run, for the first build's commit on `master` (see the correction under work item 5).
+
+Defect: a run remains the active run while it writes its reports, after its terminal status is visible. An abort arriving in that window was accepted: it cancelled the finished run's context and answered 200 with the run's real status instead of 409 `run_not_active`. The run itself was not harmed (its verdict and status were already final), but the API answered wrongly, and a test that aborts a run right after seeing it finish could fail on a slow machine.
+
+Fix: `handleAbort` treats a run with a terminal status as not active, and answers 200 only when the run really ended as aborted (D99).
+
+| Command | Where | Result |
+|---|---|---|
+| `go test ./internal/control/ -run TestAbortOfARunThatIsFinishing` without the fix | Windows | fails (500 after the 20 s abort wait; in the real server the run would have been released and the answer would have been 200) |
+| the same with the fix | Windows | passes |
+| full gate | Windows, Linux container, compose, acceptance suite | green: 156 unit and 95 integration tests pass on Windows, 0 fail, 0 skip; 42 Playwright tests pass; lint clean and unit and integration ok with `-race` on Linux (272s); compose exit 10 as documented; acceptance 56 passed |
+
+Known gaps: the integration test that caught it (`TestRunPassed`) is unchanged and still depends on timing to hit the window; the new unit test is what pins the behaviour. This also weakens one claim made earlier: "CI passed without a single fix" was true of the pull request's runs and not of the repository's whole CI history.
 
 ---
 
@@ -556,11 +573,11 @@ Other things worth knowing:
 
 From the first build: redaction could be bypassed with YAML aliases, merge keys and tagged keys; the demo built URLs from an unescaped path value; the garble mask barely depended on the seed; record strings were unbounded; quoted `traffic.command` lines could not work on Windows; `missing_timeout` was hidden by holds cut short at the end of injection; the CLI trusted the run id returned by the server for file paths; the `run_aborted` audit entry appeared after the aborted status.
 
-From the continuation: the proxy forwarded a `Cache-Control: no-cache` header that Go's server adds to requests carrying only `Pragma: no-cache` (found while making headers exact, fixed); the acceptance suite, the three-browser run and axe found no product defect.
+From the continuation: aborting a run in the moment between its terminal status and its release answered 200 instead of 409 (found by CI on Windows, fixed, D99); the proxy forwarded a `Cache-Control: no-cache` header that Go's server adds to requests carrying only `Pragma: no-cache` (found while making headers exact, fixed); the acceptance suite, the three-browser run and axe found no product defect.
 
 ## What is left
 
-1. **The one thing that needs you:** review and merge pull request #1. `master` on GitHub is still the first build (`2b7d542`); everything in this report is on the branch.
+1. **The one thing that needs you:** review and merge the pull request for the abort fix (branch `bugfix/abort-finished-run-race`). Pull request #1 is merged.
 2. Response header fidelity, if exact response names matter to a system under test: the request mechanism mirrored (D80).
 3. A real MCP client and a real OpenAI-compatible server through the proxy, to check the two stretch features against something I did not write.
 4. A load test on separate machines, with streams and large bodies, repeated enough to give intervals.
