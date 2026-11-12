@@ -333,12 +333,18 @@ func (r *Run) collect() {
 		var own []fault.Record
 		r.mu.Lock()
 		r.recordSeq = page.Next
+		injectionEnd := r.injStart.Add(r.exp.Duration)
 		for _, rec := range page.Records {
 			if !rec.Scoped && r.exp.Scope != experiment.ScopeAll {
 				// Someone else's traffic on a shared route is not this run's.
 				continue
 			}
 			own = append(own, rec)
+			if !rec.TS.Before(injectionEnd) {
+				// Arrived after the injection phase, in the moment before the
+				// faults were cleared: evidence for retries, not a metric.
+				continue
+			}
 			done := rec.TS.Add(time.Duration(rec.DurationMs * float64(time.Millisecond)))
 			b := r.bucketLocked(max(done.Unix(), r.nextBucket))
 			rm, total := b.Routes[rec.Route], r.doc.Metrics.Proxy[rec.Route]
