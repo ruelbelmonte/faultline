@@ -360,7 +360,7 @@ Known gaps:
 
 What was done:
 
-- Private repository `ruelbelmonte/faultline` created, remote `origin` added.
+- Repository `ruelbelmonte/faultline` created, remote `origin` added. It was private for the first two CI runs and was made public afterwards, at the owner's request, so that Actions minutes are free.
 - A machine-wide pre-push hook refuses direct pushes to `master`. It was not bypassed. `master` was created on GitHub at the first build's last commit (`2b7d542`), and the continuation was pushed as `feature/close-final-report-items` and opened as pull request #1, which is what triggers the workflow.
 - First run of `.github/workflows/ci.yaml` (run 43119795842, on commit `a5b61d9`): **all seven jobs passed, with no change needed.**
 
