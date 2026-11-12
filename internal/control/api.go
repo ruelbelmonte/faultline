@@ -17,6 +17,7 @@ import (
 
 	"faultline/internal/config"
 	"faultline/internal/experiment"
+	"faultline/internal/report"
 	"faultline/internal/ui"
 	"faultline/internal/yamlx"
 )
@@ -266,14 +267,19 @@ func (c *Control) handleTimeseries(w http.ResponseWriter, r *http.Request) {
 
 func (c *Control) handleAbort(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	run := c.activeRun()
-	if run == nil || run.id != id {
-		doc, _, err := c.store.Run(id)
+	notActive := func() {
+		doc, _, err := c.document(id)
 		if err != nil {
 			c.notFoundOr500(w, err)
 			return
 		}
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "run_not_active", "status": doc.Status})
+	}
+	run := c.activeRun()
+	// A run that already shows a terminal status is still held as active
+	// while it writes its reports; it can no longer be aborted.
+	if run == nil || run.id != id || run.finishing() {
+		notActive()
 		return
 	}
 	run.abort(ReasonManual, ActorToken)
@@ -283,8 +289,12 @@ func (c *Control) handleAbort(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "abort_timeout")
 		return
 	}
-	doc, _ := run.Snapshot()
-	writeJSON(w, http.StatusOK, map[string]string{"status": doc.Status})
+	if doc, _ := run.Snapshot(); doc.Status != report.StatusAborted {
+		// The run completed in the instant before the abort reached it.
+		notActive()
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": report.StatusAborted})
 }
 
 // handleKill is the kill switch: the proxy is cleared first, then any active

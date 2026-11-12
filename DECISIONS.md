@@ -215,6 +215,8 @@ The contract is `docs/mcp-faults.md`, written before the code because the PRD gi
 
 **D72. The `run_aborted` audit entry is written before the aborted status becomes visible through the API.** Found by the Linux race run: a client that saw `aborted` could read the audit log before the entry existed.
 
+**D99. Aborting a run that already shows a terminal status is 409, also in the moment before it is released.** A run stays the control plane's active run while it writes its reports, after `completed` or `aborted` is visible through the API (D63). `POST /api/v1/runs/{id}/abort` in that window used to cancel the run's context, wait for it and answer 200 with the run's real status, for example `{"status":"completed"}`, where D40 says 409 `run_not_active`. It now answers 409 there, and also when an abort loses the race against a run that completes at the same instant: 200 is only ever `{"status":"aborted"}`. Found by the first CI run of the first build's commit, where `TestRunPassed` failed on `windows-latest` with "abort a finished run: expected 409, got 200".
+
 ## Packaging and docs
 
 **D73. `examples/experiments/` holds four experiments with documented results against the naive demo: passed, failed, failed, passed.** `faultline run examples/experiments/ --fail-on-breach` therefore exits 10, and the README says so. Alternative: only passing examples. Reason: the failing ones are what show the findings; an example set that cannot fail teaches nothing.
