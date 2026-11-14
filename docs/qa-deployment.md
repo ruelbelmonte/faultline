@@ -80,7 +80,7 @@ Under `data_dir`, on the control plane's volume:
 
 Not kept: request or response bodies, header values, query strings. Values of headers listed in `redaction.headers` are replaced by `[REDACTED]` in anything stored or shown. The data directory is created with owner-only permissions. Give it a persistent volume if run history matters, and delete it to forget everything.
 
-Logs are structured (`--log-format json`). They contain run ids, route names, statuses and error messages from failed upstream calls, which can include upstream host names.
+Logs are structured (`--log-format json`). They contain run ids, route names, methods and statuses. A failed upstream call is logged as the route, the method and a class of error (`connection_refused`, `connection_reset`, `timeout`, `dns`, `tls`, `eof`, `transport` or `other`), never the error text, because Go's transport errors include the full upstream URL and its query string.
 
 ## Checklist
 
