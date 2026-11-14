@@ -476,6 +476,46 @@ func TestLLMFaultsThroughControl(t *testing.T) {
 	}
 }
 
+// Issue #10: the traffic command's environment carries the run id but none of
+// Faultline's tokens, although control itself was started with both.
+func TestTrafficCommandEnvHasNoTokens(t *testing.T) {
+	f := startFull(t, "naive", func(s *stack) { s.controlExtra = "  allow_commands: true\n" })
+	out := f.s.dir + "/command-env.txt"
+	command := `env > "` + out + `"`
+	if runtime.GOOS == "windows" {
+		command = `set > "` + strings.ReplaceAll(out, "/", `\`) + `"`
+	}
+	yaml := `version: 1
+name: command-env
+target: {route: inventory}
+duration: 1s
+traffic:
+  command: '` + command + `'
+recovery: {timeout: 1s}
+faults:
+  - id: f1
+    type: latency
+    params: {ms: 1}
+`
+	id := f.control.createRun(t, yaml)
+	f.control.waitStatus(t, id, 10*time.Second, "injecting")
+	call("GET", f.proxy.url("/inventory/stock/1"), scoped(id), "")
+	f.control.waitDone(t, id, 30*time.Second)
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("the command did not run: %v", err)
+	}
+	env := string(data)
+	if !strings.Contains(env, "FAULTLINE_RUN_ID="+id) {
+		t.Fatalf("the command must still get FAULTLINE_RUN_ID:\n%s", env)
+	}
+	for _, leak := range []string{controlToken, adminToken, "FAULTLINE_TOKEN=", "FAULTLINE_ADMIN_TOKEN="} {
+		if strings.Contains(strings.ToUpper(env), strings.ToUpper(leak)) {
+			t.Fatalf("the command's environment leaks %q", leak)
+		}
+	}
+}
+
 // traffic.command: the command is re-run until the run ends and gets the run
 // id and scope header name in its environment.
 func TestTrafficCommand(t *testing.T) {

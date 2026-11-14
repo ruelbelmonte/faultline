@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"faultline/internal/config"
 	"faultline/internal/experiment"
 )
 
@@ -111,7 +112,9 @@ func (r *Run) driveCommand(ctx context.Context, command string) {
 	for ctx.Err() == nil {
 		cmd := shellCommand(ctx, command)
 		cmd.WaitDelay = 2 * time.Second
-		cmd.Env = append(os.Environ(),
+		// The command never sees Faultline's tokens: it may log or forward its
+		// environment, and it does not need them.
+		cmd.Env = append(config.EnvWithoutTokens(os.Environ()),
 			"FAULTLINE_RUN_ID="+r.id,
 			"FAULTLINE_SCOPE_HEADER="+r.c.cfg.ScopeHeader,
 		)

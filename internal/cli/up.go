@@ -132,11 +132,7 @@ func (e *env) cmdUp(args []string) int {
 	}
 	for _, name := range []string{"proxy", "control"} {
 		cmd := exec.Command(self, name, "--config", *sf.config, "--log-format", *sf.logFormat)
-		cmd.Env = append(os.Environ(),
-			config.EnvToken+"="+tokens[config.EnvToken],
-			config.EnvAdminToken+"="+tokens[config.EnvAdminToken],
-			envParentWatch+"=1",
-		)
+		cmd.Env = childEnv(name, os.Environ(), tokens)
 		cmd.Stdout, cmd.Stderr = e.stderr, e.stderr
 		stdin, err := cmd.StdinPipe()
 		if err == nil {
@@ -227,4 +223,17 @@ func waitHealthy(ctx context.Context, urls ...string) bool {
 		}
 	}
 	return true
+}
+
+// childEnv is the environment of the `up` child named name ("proxy" or
+// "control"): the parent's environment without any Faultline token, plus
+// only the tokens that child needs. The proxy needs the admin token alone;
+// control needs both.
+func childEnv(name string, environ []string, tokens map[string]string) []string {
+	env := append(config.EnvWithoutTokens(environ), envParentWatch+"=1",
+		config.EnvAdminToken+"="+tokens[config.EnvAdminToken])
+	if name == "control" {
+		env = append(env, config.EnvToken+"="+tokens[config.EnvToken])
+	}
+	return env
 }

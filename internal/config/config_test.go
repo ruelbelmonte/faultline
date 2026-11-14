@@ -142,3 +142,26 @@ func TestToken(t *testing.T) {
 		t.Fatalf("16 character token must be accepted: %v", err)
 	}
 }
+
+func TestEnvWithoutTokens(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin",
+		"FAULTLINE_TOKEN=control-secret-0123456789",
+		"FAULTLINE_ADMIN_TOKEN=admin-secret-0123456789",
+		"faultline_token=lower-case-on-windows",
+		"FAULTLINE_URL=http://127.0.0.1:7700",
+		"FAULTLINE_RUN_ID=run_abcdefghijkl",
+		"HOME=/home/synthetic",
+	}
+	got := strings.Join(EnvWithoutTokens(in), "\n")
+	for _, secret := range []string{"control-secret", "admin-secret", "lower-case-on-windows"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("token %q survived: %s", secret, got)
+		}
+	}
+	for _, keep := range []string{"PATH=/usr/bin", "FAULTLINE_URL=", "FAULTLINE_RUN_ID=", "HOME="} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("%q must be kept: %s", keep, got)
+		}
+	}
+}

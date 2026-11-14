@@ -288,6 +288,28 @@ func headerName(errs *yamlx.Errors, path, v string) string {
 	return v
 }
 
+// IsTokenVar reports whether an environment variable name is one of
+// Faultline's secret tokens: any FAULTLINE_* variable whose name contains
+// TOKEN. Names are compared case-insensitively, as Windows does.
+func IsTokenVar(name string) bool {
+	n := strings.ToUpper(name)
+	return strings.HasPrefix(n, "FAULTLINE_") && strings.Contains(n, "TOKEN")
+}
+
+// EnvWithoutTokens returns a copy of environ (KEY=VALUE entries, as from
+// os.Environ) without Faultline's token variables, for starting processes
+// that must not see them.
+func EnvWithoutTokens(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if !IsTokenVar(name) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // Token reads a required bearer token from the environment.
 func Token(env string) (string, error) {
 	v := os.Getenv(env)
