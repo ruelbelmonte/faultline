@@ -66,12 +66,15 @@ faults:                       # at least one; see faults.md
 - A fault's `start + duration` does not exceed the experiment's `duration`.
 - `traffic` has exactly one of `requests` and `command`; with `requests`, `base_url` and `rps` are required.
 - `scope: all` is rejected unless `control.allow_unscoped: true`.
+- `traffic.command` is rejected unless `control.allow_commands: true`.
 
 ## Traffic
 
 With `requests`, the driver sends them round-robin to `base_url` at `rps` using `concurrency` workers. Every request carries the scope header with the run id and a fresh UUID in the correlation header. The driver records status, latency and time. A status of 500 or above and a transport error both count as an error; 4xx does not. When every worker is busy the driver drops the backlog rather than queueing it, and it does not follow redirects. It runs during injection and recovery.
 
-With `command`, Faultline runs the shell command (`sh -c`, or `cmd.exe /S /C` on Windows) again and again until the run ends, with `FAULTLINE_RUN_ID` and `FAULTLINE_SCOPE_HEADER` in its environment. Your test must send that header itself. A command produces no driver metrics, so `error_rate_max` and `p95_latency_ms_max` have no data and count as breached; use probes for the hypothesis instead.
+With `command`, which needs `control.allow_commands: true` in `faultline.yaml`, Faultline runs the shell command (`sh -c`, or `cmd.exe /S /C` on Windows) again and again until the run ends, with `FAULTLINE_RUN_ID` and `FAULTLINE_SCOPE_HEADER` in its environment. Your test must send that header itself. A command produces no driver metrics, so `error_rate_max` and `p95_latency_ms_max` have no data and count as breached; use probes for the hypothesis instead.
+
+> **Enabling commands gives the control token shell access.** With `allow_commands: true`, anyone who holds `FAULTLINE_TOKEN` can run any command on the control host with the control process's privileges, through the API or the dashboard. Leave it off in shared environments; turn it on only where every token holder is already trusted with that host. The shipped container image has no shell, so command mode does not work there anyway.
 
 With no `traffic` at all, something else has to send requests carrying the run id (read it from the run document) or the faults will never trigger.
 

@@ -165,6 +165,7 @@ Across several files the worst result wins: 12, then 10, then 11, then 0. `--rep
 | Abort thresholds | A run aborts itself when the error rate or consecutive probe failures cross the limits in `abort`. |
 | Environment guard | `proxy`, `control` and `up` exit with code 2 when `environment` is `prod`, `production` or `live` (any case). |
 | One run at a time | Creating a run while another is active answers 409. |
+| No shell commands by default | `traffic.command` is rejected unless `control.allow_commands: true`. With it on, the control token can run shell commands on the control host. |
 
 ## Security and data handling
 

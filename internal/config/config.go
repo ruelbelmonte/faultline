@@ -41,6 +41,10 @@ type Config struct {
 	ProxyAdminURL         string
 	MaxExperimentDuration time.Duration
 	AllowUnscoped         bool
+	// AllowCommands enables traffic.command. Off by default: with it on,
+	// anyone holding the control token can run shell commands on the
+	// control host.
+	AllowCommands bool
 
 	ScopeHeader       string
 	CorrelationHeader string
@@ -173,6 +177,9 @@ func Parse(data []byte) (*Config, error) {
 		}
 		if v, ok := m.Bool("allow_unscoped"); ok {
 			c.AllowUnscoped = v
+		}
+		if v, ok := m.Bool("allow_commands"); ok {
+			c.AllowCommands = v
 		}
 		m.Done()
 	}

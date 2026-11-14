@@ -626,6 +626,61 @@ func TestScopeAllWhenAllowed(t *testing.T) {
 	}
 }
 
+// Issue #9: with the default config, an experiment carrying traffic.command is
+// rejected by POST /api/v1/runs and by POST /api/v1/experiments/validate, with
+// the error at traffic.command, and nothing runs.
+func TestTrafficCommandRejectedByDefault(t *testing.T) {
+	f := startFull(t, "naive")
+	marker := f.s.dir + "/must-not-exist.txt"
+	yaml := `version: 1
+name: command-off
+target: {route: inventory}
+duration: 2s
+traffic:
+  command: 'echo ran > "` + marker + `"'
+faults:
+  - {id: f1, type: latency, params: {ms: 1}}
+`
+	type valErr struct{ Path, Message string }
+	var created struct {
+		Error  string
+		Errors []valErr
+	}
+	if code := f.control.api(t, "POST", "/api/v1/runs", obj{"experiment_yaml": yaml}, &created); code != 400 {
+		t.Fatalf("POST /api/v1/runs: expected 400, got %d %+v", code, created)
+	}
+	found := false
+	for _, e := range created.Errors {
+		found = found || e.Path == "traffic.command"
+	}
+	if !found {
+		t.Fatalf("POST /api/v1/runs: expected an error at traffic.command, got %+v", created.Errors)
+	}
+	var validated struct {
+		Valid  bool
+		Errors []valErr
+	}
+	if code := f.control.api(t, "POST", "/api/v1/experiments/validate", obj{"yaml": yaml}, &validated); code != 200 || validated.Valid {
+		t.Fatalf("validate: expected 200 and valid=false, got %d %+v", code, validated)
+	}
+	found = false
+	for _, e := range validated.Errors {
+		found = found || e.Path == "traffic.command"
+	}
+	if !found {
+		t.Fatalf("validate: expected an error at traffic.command, got %+v", validated.Errors)
+	}
+	var runs []map[string]any
+	f.control.api(t, "GET", "/api/v1/runs", nil, &runs)
+	if len(runs) != 0 {
+		t.Fatalf("a rejected experiment must not create a run: %v", runs)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the command ran although control.allow_commands is false")
+	}
+}
+
 func TestControlAuth(t *testing.T) {
 	f := startFull(t, "naive")
 	var health map[string]bool

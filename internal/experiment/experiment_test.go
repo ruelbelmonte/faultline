@@ -232,9 +232,37 @@ traffic:
 faults:
   - {id: f1, type: reset}
 `
-	e, errs := Parse([]byte(doc), testConfig())
+	cfg := testConfig()
+	cfg.AllowCommands = true
+	e, errs := Parse([]byte(doc), cfg)
 	if len(errs) > 0 || e.Traffic.Command != "npm run e2e" {
-		t.Fatalf("command traffic should be accepted: %v", errs)
+		t.Fatalf("command traffic should be accepted when control.allow_commands is true: %v", errs)
+	}
+}
+
+// Issue #9: with the default config, traffic.command is a validation error at
+// traffic.command, so the control token cannot be used to run shell commands.
+func TestCommandTrafficRejectedByDefault(t *testing.T) {
+	doc := `version: 1
+name: cmd
+target: {route: inventory}
+duration: 5s
+traffic:
+  command: "npm run e2e"
+faults:
+  - {id: f1, type: reset}
+`
+	if config.Default().AllowCommands {
+		t.Fatal("control.allow_commands must default to false")
+	}
+	_, errs := Parse([]byte(doc), testConfig())
+	if !hasPath(errs, "traffic.command") {
+		t.Fatalf("expected an error at traffic.command, got %v", errs)
+	}
+	for _, e := range errs {
+		if e.Path == "traffic.command" && !strings.Contains(e.Message, "control.allow_commands") {
+			t.Fatalf("the message should name the setting that enables commands: %q", e.Message)
+		}
 	}
 }
 

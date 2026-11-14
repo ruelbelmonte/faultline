@@ -479,7 +479,7 @@ func TestLLMFaultsThroughControl(t *testing.T) {
 // traffic.command: the command is re-run until the run ends and gets the run
 // id and scope header name in its environment.
 func TestTrafficCommand(t *testing.T) {
-	f := startFull(t, "naive")
+	f := startFull(t, "naive", func(s *stack) { s.controlExtra = "  allow_commands: true\n" })
 	out := f.s.dir + "/command-output.txt"
 	command := `echo "$FAULTLINE_RUN_ID $FAULTLINE_SCOPE_HEADER" >> "` + out + `"`
 	if runtime.GOOS == "windows" {

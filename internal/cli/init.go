@@ -23,6 +23,8 @@ control:
   proxy_admin_url: http://127.0.0.1:7702
   max_experiment_duration: 15m
   allow_unscoped: false       # experiments with scope: all are rejected unless true
+  allow_commands: false       # traffic.command is rejected unless true. When true, the
+                              # control token can run shell commands on this host
 
 scope:
   header: X-Chaos-Run         # header carrying the run id

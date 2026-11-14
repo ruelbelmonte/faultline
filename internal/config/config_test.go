@@ -63,6 +63,20 @@ func TestDefaultsApply(t *testing.T) {
 	}
 }
 
+func TestAllowCommands(t *testing.T) {
+	c, err := Parse([]byte("version: 1\n"))
+	if err != nil || c.AllowCommands {
+		t.Fatalf("control.allow_commands must default to false: %v %+v", err, c)
+	}
+	c, err = Parse([]byte("version: 1\ncontrol:\n  allow_commands: true\n"))
+	if err != nil || !c.AllowCommands {
+		t.Fatalf("control.allow_commands: true must be accepted: %v", err)
+	}
+	if _, err := Parse([]byte("version: 1\ncontrol:\n  allow_commands: yes-please\n")); err == nil {
+		t.Fatal("a non-boolean allow_commands must be rejected")
+	}
+}
+
 func TestProductionGuard(t *testing.T) {
 	for _, env := range []string{"prod", "production", "live", "PROD", "Production", "LiVe"} {
 		_, err := Parse([]byte("version: 1\nenvironment: " + env + "\n"))
