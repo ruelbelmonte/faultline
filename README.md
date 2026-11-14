@@ -171,7 +171,7 @@ Across several files the worst result wins: 12, then 10, then 11, then 0. `--rep
 
 - Bodies are never stored. The proxy looks inside a request body in one case only: to tell whether a request is an MCP tool call, when an MCP fault of the active run otherwise matches it (at most 1 MiB, in memory, forwarded unchanged). The proxy records method, path (without query string), status, timing, the correlation id and whether a fault applied. It does not record header values.
 - Values of headers listed in `redaction.headers` are replaced with `[REDACTED]` wherever they could be stored or shown, including inside a saved experiment. The driver keeps the real value in memory only.
-- Tokens are compared in constant time and are never logged.
+- Tokens are compared in constant time and are never logged. Processes Faultline starts get only the tokens they need: the traffic command gets none, and under `faultline up` the proxy gets the admin token only.
 - All listeners bind to `127.0.0.1` by default. To expose them in QA, see [docs/qa-deployment.md](docs/qa-deployment.md): restrict the network, terminate TLS in front of the control plane, and keep the proxy admin port private.
 - The audit log (`{data_dir}/audit.jsonl` and SQLite) is append-only from the application's side. It is not tamper-proof against someone with access to the files.
 - The experiment file's `traffic.requests[].body` is stored as part of the experiment. Keep it synthetic.
