@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"faultline/internal/config"
@@ -276,14 +278,14 @@ func (p *Proxy) upstreamRequest(r *http.Request, rt *route, rest string, readabl
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, rt *route, rest string, o forwardOpts) outcome {
 	req, err := p.upstreamRequest(r, rt, rest, o.rewrite != nil)
 	if err != nil {
-		return p.upstreamError(w, o.rule, err)
+		return p.upstreamError(w, r, rt, o.rule, err)
 	}
 	resp, err := p.transport.RoundTrip(req)
 	if err != nil {
 		if r.Context().Err() != nil {
 			return outcome{}
 		}
-		return p.upstreamError(w, o.rule, err)
+		return p.upstreamError(w, r, rt, o.rule, err)
 	}
 	defer resp.Body.Close()
 	if o.rewrite != nil {
@@ -375,8 +377,12 @@ func (p *Proxy) write(ctx context.Context, w http.ResponseWriter, rc *http.Respo
 	return nil
 }
 
-func (p *Proxy) upstreamError(w http.ResponseWriter, r *rule, err error) outcome {
-	p.log.Warn("upstream request failed", "error", err.Error())
+// upstreamError answers 502 for an upstream call that failed. The log line
+// carries the route, the method and a class of error, never the error text:
+// Go's transport errors contain the full upstream URL, query string included,
+// and a query string can carry identifiers.
+func (p *Proxy) upstreamError(w http.ResponseWriter, req *http.Request, rt *route, r *rule, err error) outcome {
+	p.log.Warn("upstream request failed", "route", rt.name, "method", req.Method, "error_class", errorClass(err))
 	w.Header().Set(headerFaultlne, "upstream-error")
 	w.Header().Set("Content-Type", "application/json")
 	p.setFaultHeader(w.Header(), r)
@@ -518,4 +524,31 @@ func (p *Proxy) hold(w http.ResponseWriter, r *http.Request, rs *ruleSet, d time
 	held := ms(time.Since(begin))
 	closeConn(w, false)
 	return outcome{clientHeldMs: &held}
+}
+
+// errorClass names the kind of an upstream failure without any of its text.
+func errorClass(err error) string {
+	var dnsErr *net.DNSError
+	var certErr *tls.CertificateVerificationError
+	var recordErr tls.RecordHeaderError
+	var netErr net.Error
+	switch {
+	case errors.As(err, &dnsErr):
+		return "dns"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection_refused"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection_reset"
+	case errors.As(err, &certErr), errors.As(err, &recordErr):
+		return "tls"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return "timeout"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return "eof"
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return "transport"
+	}
+	return "other"
 }
