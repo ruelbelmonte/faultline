@@ -18,6 +18,7 @@ control:
   proxy_admin_url: http://proxy:7702
   max_experiment_duration: 15m
   allow_unscoped: false
+  allow_commands: false
 
 scope:
   header: X-Chaos-Run

@@ -151,7 +151,7 @@ func Parse(data []byte, cfg *config.Config) (*Experiment, yamlx.Errors) {
 	}
 
 	if m := root.Map("traffic"); m != nil {
-		e.Traffic = parseTraffic(m, &errs)
+		e.Traffic = parseTraffic(m, cfg, &errs)
 	}
 	if m := root.Map("steady_state"); m != nil {
 		parseSteadyState(m, e, &errs)
@@ -199,7 +199,7 @@ func Parse(data []byte, cfg *config.Config) (*Experiment, yamlx.Errors) {
 	return e, nil
 }
 
-func parseTraffic(m *yamlx.Map, errs *yamlx.Errors) *Traffic {
+func parseTraffic(m *yamlx.Map, cfg *config.Config, errs *yamlx.Errors) *Traffic {
 	t := &Traffic{Concurrency: 1, Timeout: 30 * time.Second}
 	hasRequests, hasCommand := m.Has("requests"), m.Has("command")
 	if hasRequests == hasCommand {
@@ -264,7 +264,10 @@ func parseTraffic(m *yamlx.Map, errs *yamlx.Errors) *Traffic {
 	}
 	if v, ok := m.Str("command"); ok {
 		t.Command = v
-		if strings.TrimSpace(v) == "" {
+		switch {
+		case !cfg.AllowCommands:
+			errs.Add(m.Path("command"), "traffic.command is rejected unless control.allow_commands is true")
+		case strings.TrimSpace(v) == "":
 			errs.Add(m.Path("command"), "must not be empty")
 		}
 	}
