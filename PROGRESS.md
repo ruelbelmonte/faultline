@@ -698,9 +698,9 @@ Started 2026-11-15, after Goal 1 was merged to `master` (cdda636): issues #28, #
 
 ## Gates
 
-- Local, per commit, in a clean worktree: `make lint`, `make test`, `go test -race` on the packages touched, `make test-integration`. Green for #28 (the Go content of 7cbfebb) and #29 (675e795): GATE_29_PLACEHOLDER. #24 changes workflows, Dockerfiles and docs only; its gate is CI (the `docker` job builds both Dockerfiles with the digest pins and cross-compiling stages, and the `release` dry run builds everything a release would).
+- Local, per commit, in a clean worktree: `make lint`, `make test`, `go test -race` on the packages touched, `make test-integration`. Green for #28 (the Go content of 7cbfebb) and #29 (675e795): both `GATE OK` (#28 on 9c4f680, #29 on 6db0a08, whose Go content is identical to 7cbfebb and 675e795; the later rewrite only changed the Playwright spec). #24 changes workflows, Dockerfiles and docs only; its gate is CI (the `docker` job builds both Dockerfiles with the digest pins and cross-compiling stages, and the `release` dry run builds everything a release would).
 - Playwright, locally in Chromium: the new comparison test and the full axe audit pass. In CI the first run failed in Firefox and WebKit only: the three browser projects share one control plane, so the "first" run in the second and third browsers had the first browser's runs as a baseline. The test now uses an experiment per browser. A test defect, not a product one.
-- CI on pull request #44: CI_44_PLACEHOLDER
+- CI on pull request #44, head b3b0b2c: all 8 `ci` jobs green, run 43699930008 (https://github.com/ruelbelmonte/faultline/actions/runs/43699930008), including `ui` (Playwright and axe in Chromium, Firefox and WebKit) and `docker` (both digest-pinned Dockerfiles). The `release` dry run, run 43699930018 (https://github.com/ruelbelmonte/faultline/actions/runs/43699930018): `plan`, `binaries` (twelve binaries, version check, SBOM, checksums) and both multi-platform `images` green, `release` skipped as designed.
 - `actionlint` (v1.7.7) reports nothing for `ci.yaml` and `release.yaml`.
 
 ## Not done, and why
