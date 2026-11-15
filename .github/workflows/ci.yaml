@@ -26,6 +26,16 @@ jobs:
             GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/faultline ./cmd/faultline-demo
           done
 
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Known vulnerabilities in reachable Go code
+        run: make vuln
+
   race:
     runs-on: ubuntu-latest
     steps:
@@ -64,6 +74,9 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Build the dashboard
         run: make ui
+      - name: npm audit (high and critical)
+        working-directory: ui
+        run: npm audit --audit-level=high
       - name: Committed dashboard build matches the source
         run: git diff --exit-code -- internal/ui/dist
       - name: Build binaries
@@ -80,6 +93,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build images
         run: make docker
+      - name: Scan the faultline image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: faultline:0.1.0
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
+      - name: Scan the faultline-demo image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: faultline-demo:0.1.0
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
       - name: Compose example
         env:
           FAULTLINE_TOKEN: ci-compose-control-token-0123456789

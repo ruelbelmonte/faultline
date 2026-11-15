@@ -175,7 +175,7 @@ Across several files the worst result wins: 12, then 10, then 11, then 0. `--rep
 - Tokens are compared in constant time and are never logged. Processes Faultline starts get only the tokens they need: the traffic command gets none, and under `faultline up` the proxy gets the admin token only.
 - All listeners bind to `127.0.0.1` by default. To expose them in QA, see [docs/qa-deployment.md](docs/qa-deployment.md): restrict the network, terminate TLS in front of the control plane, and keep the proxy admin port private.
 - The audit log (`{data_dir}/audit.jsonl` and SQLite) is append-only from the application's side. It is not tamper-proof against someone with access to the files.
-- The experiment file's `traffic.requests[].body` is stored as part of the experiment. Keep it synthetic.
+- The experiment file's `traffic.requests[].body` is sent as written and stored only as a SHA-256 fingerprint, which a short or guessable value can be recovered from. Keep it synthetic.
 
 ## Development
 
@@ -187,11 +187,14 @@ make test-race          # unit and integration tests with the race detector (nee
 make test-load          # proxy latency overhead and throughput, with and without an active run
 make test-ui            # Playwright smoke test and axe accessibility audit in Chromium, Firefox and WebKit (needs Node)
 make lint               # go vet, gofmt, staticcheck
+make vuln               # govulncheck: known vulnerabilities in reachable Go code (needs network)
 make ui                 # rebuild the dashboard into internal/ui/dist
 make docker             # build both images
 ```
 
-The dashboard's built assets are committed under `internal/ui/dist`, so building the binaries needs Go only. `PROGRESS.md` has the gate results per milestone and `DECISIONS.md` records every choice the specification left open.
+The dashboard's built assets are committed under `internal/ui/dist`, so building the binaries needs Go only.
+
+CI also checks the supply chain: `govulncheck` on the Go code, `npm audit --audit-level=high` on the dashboard's packages, and a Trivy scan (high and critical) of both images. An image finding that cannot be fixed yet goes in `.trivyignore.yaml` with a reason and an expiry date, after which it fails CI again. Dependabot (`.github/dependabot.yml`) proposes updates weekly for Go modules, npm packages, base images and the pinned Actions. `PROGRESS.md` has the gate results per milestone and `DECISIONS.md` records every choice the specification left open.
 
 ## Limitations
 

@@ -3,8 +3,9 @@ BIN     := bin
 VERSION ?= 0.1.0
 LDFLAGS := -X faultline/internal/cli.Version=$(VERSION)
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
+GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
-.PHONY: build ui test test-integration test-race test-load test-ui lint demo docker clean
+.PHONY: build ui test test-integration test-race test-load test-ui lint vuln demo docker clean
 
 # Builds both binaries. The web UI is embedded from internal/ui/dist, which is
 # committed, so this needs Go only. Run `make ui` first after changing ui/.
@@ -40,6 +41,11 @@ lint:
 	$(GO) vet -tags "integration load" ./test/...
 	@out="$$(gofmt -l cmd internal test)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	$(GO) run $(STATICCHECK) -tags "integration load" ./...
+
+# Known vulnerabilities in the Go dependencies and standard library that the
+# code actually reaches. Needs network access to vuln.go.dev.
+vuln:
+	$(GO) run $(GOVULNCHECK) ./...
 
 # Runs the demo system under test on its default ports.
 demo: build

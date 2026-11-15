@@ -1,0 +1,11 @@
+# Dated exceptions for the image scan in .github/workflows/ci.yaml.
+#
+# Every entry needs a reason (statement) and an expiry (expired_at). After the
+# expiry date the finding fails CI again, so an exception is reviewed rather
+# than forgotten. Example:
+#
+# vulnerabilities:
+#   - id: CVE-0000-00000
+#     statement: Not reachable from faultline; fix waits on upstream release X.
+#     expired_at: 2027-01-31
+vulnerabilities: []
