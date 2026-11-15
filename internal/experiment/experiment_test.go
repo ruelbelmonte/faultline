@@ -521,3 +521,23 @@ func TestWarningsForCredentialsInURLs(t *testing.T) {
 		t.Fatalf("no warnings expected for a clean document: %v", w)
 	}
 }
+
+// Issue #11: probe and traffic URLs are checked against control.allowed_hosts,
+// with errors at dotted paths, and metadata addresses are refused by default.
+func TestHostAllowListInValidation(t *testing.T) {
+	meta := strings.Replace(base, "url: http://127.0.0.1:9000/health", "url: http://169.254.169.254/latest/meta-data/", 1)
+	_, errs := Parse([]byte(meta), testConfig())
+	if !hasPath(errs, "steady_state.probes[0].url") {
+		t.Fatalf("a metadata probe URL must be refused at steady_state.probes[0].url: %v", errs)
+	}
+	cfg := testConfig()
+	cfg.AllowedHosts = []string{"shop.qa.internal"}
+	_, errs = Parse([]byte(base), cfg)
+	if !hasPath(errs, "traffic.base_url") || !hasPath(errs, "steady_state.probes[0].url") {
+		t.Fatalf("hosts outside allowed_hosts must be refused at their paths: %v", errs)
+	}
+	cfg.AllowedHosts = []string{"127.0.0.1:9000"}
+	if _, errs := Parse([]byte(base), cfg); len(errs) > 0 {
+		t.Fatalf("listed hosts must be accepted: %v", errs)
+	}
+}

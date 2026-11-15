@@ -154,7 +154,7 @@ func Parse(data []byte, cfg *config.Config) (*Experiment, yamlx.Errors) {
 		e.Traffic = parseTraffic(m, cfg, &errs)
 	}
 	if m := root.Map("steady_state"); m != nil {
-		parseSteadyState(m, e, &errs)
+		parseSteadyState(m, e, cfg, &errs)
 	}
 	if m := root.Map("abort"); m != nil {
 		if v, ok := m.Float("error_rate_max"); ok {
@@ -209,6 +209,8 @@ func parseTraffic(m *yamlx.Map, cfg *config.Config, errs *yamlx.Errors) *Traffic
 		t.BaseURL = strings.TrimRight(v, "/")
 		if !validURL(v) {
 			errs.Add(m.Path("base_url"), "must be an http or https URL")
+		} else if err := cfg.CheckHost(v); err != nil {
+			errs.Add(m.Path("base_url"), "%s", err.Error())
 		}
 	} else if hasRequests {
 		errs.Add(m.Path("base_url"), "is required with requests")
@@ -275,7 +277,7 @@ func parseTraffic(m *yamlx.Map, cfg *config.Config, errs *yamlx.Errors) *Traffic
 	return t
 }
 
-func parseSteadyState(m *yamlx.Map, e *Experiment, errs *yamlx.Errors) {
+func parseSteadyState(m *yamlx.Map, e *Experiment, cfg *config.Config, errs *yamlx.Errors) {
 	if pm := m.Map("precheck"); pm != nil {
 		if v, ok := pm.Int("consecutive_ok"); ok {
 			e.PrecheckConsecutiveOK = int(v)
@@ -314,6 +316,8 @@ func parseSteadyState(m *yamlx.Map, e *Experiment, errs *yamlx.Errors) {
 				p.URL = v
 				if !validURL(v) {
 					errs.Add(pm.Path("url"), "must be an http or https URL")
+				} else if err := cfg.CheckHost(v); err != nil {
+					errs.Add(pm.Path("url"), "%s", err.Error())
 				}
 			}
 		}

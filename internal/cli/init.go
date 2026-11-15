@@ -25,6 +25,8 @@ control:
   allow_unscoped: false       # experiments with scope: all are rejected unless true
   allow_commands: false       # traffic.command is rejected unless true. When true, the
                               # control token can run shell commands on this host
+  allowed_hosts: []           # hosts probe and traffic URLs may use, e.g. ['*.qa.internal'].
+                              # Empty allows any host except link-local and cloud metadata addresses
 
 scope:
   header: X-Chaos-Run         # header carrying the run id

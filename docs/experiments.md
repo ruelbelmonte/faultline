@@ -67,6 +67,7 @@ faults:                       # at least one; see faults.md
 - `traffic` has exactly one of `requests` and `command`; with `requests`, `base_url` and `rps` are required.
 - `scope: all` is rejected unless `control.allow_unscoped: true`.
 - `traffic.command` is rejected unless `control.allow_commands: true`.
+- The hosts of `traffic.base_url` and every probe `url` must pass `control.allowed_hosts`: link-local and cloud metadata addresses (`169.254.0.0/16`, `fe80::/10`, `metadata.google.internal` and similar) are refused unless listed exactly, and when the list is not empty the host or `host:port` must match one of its patterns (`*.qa.internal`, `10.0.0.5:8080`). The traffic driver and the probes check the address they actually connect to as well, so a name that resolves to a metadata address is refused at connect time.
 
 ## Traffic
 

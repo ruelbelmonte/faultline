@@ -28,7 +28,7 @@ func (r *Run) drive(ctx context.Context) {
 func (r *Run) driveRequests(ctx context.Context, t *experiment.Traffic) {
 	client := &http.Client{
 		Timeout:   t.Timeout,
-		Transport: &http.Transport{MaxIdleConnsPerHost: t.Concurrency, DisableCompression: true},
+		Transport: &http.Transport{MaxIdleConnsPerHost: t.Concurrency, DisableCompression: true, DialContext: r.c.dialContext},
 		// The status of the system under test is what counts, not where it points.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -132,7 +132,7 @@ func (r *Run) driveCommand(ctx context.Context, command string) {
 func (r *Run) probe(ctx context.Context, p experiment.Probe) {
 	client := &http.Client{
 		Timeout:       p.Timeout,
-		Transport:     &http.Transport{DisableKeepAlives: true},
+		Transport:     &http.Transport{DisableKeepAlives: true, DialContext: r.c.dialContext},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	tick := time.NewTicker(p.Interval)

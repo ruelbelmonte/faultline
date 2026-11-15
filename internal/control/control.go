@@ -186,6 +186,9 @@ func Serve(ctx context.Context, cfg *config.Config, token, adminToken string, lo
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	log.Info("control listening", "addr", ln.Addr().String(), "environment", cfg.Environment, "proxy_admin_url", cfg.ProxyAdminURL)
+	if w := HostWarning(cfg); w != "" {
+		log.Warn(w)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -203,4 +206,13 @@ func Serve(ctx context.Context, cfg *config.Config, token, adminToken string, lo
 		return nil
 	}
 	return err
+}
+
+// HostWarning is the startup warning for a shared environment whose probe
+// and traffic hosts are not restricted, or "" when there is nothing to say.
+func HostWarning(cfg *config.Config) string {
+	if cfg.Environment == "qa" && len(cfg.AllowedHosts) == 0 {
+		return "control.allowed_hosts is empty: experiments may send probe and traffic requests to any host the control plane can reach. Set it to the hosts of the systems under test"
+	}
+	return ""
 }
