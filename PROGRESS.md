@@ -638,8 +638,9 @@ Every new test was written before the fix and seen failing against the old code:
 
 **#23**
 - [x] All new jobs green on the pull request: run 43657493407.
-- [ ] The first Dependabot pull requests open. Not possible yet: Dependabot reads `.github/dependabot.yml` from the default branch only, so this happens after #37 merges.
-- [ ] Secret scanning and push protection turned on. A repository setting, needing the owner (see "Not done").
+- [x] #37 merged into `master` (2519ab7, 2026-11-15), closing #9, #10, #11, #12, #13 and #23.
+- [ ] The first Dependabot pull requests open. **Dated exception, review by 2026-11-22:** `.github/dependabot.yml` reached `master` on 2026-11-15 and no Dependabot pull request was open at 06:33 UTC that day. Dependabot runs on its own weekly schedule. If none has opened by the review date, check Insights, Dependency graph, Dependabot for errors.
+- [ ] Secret scanning and push protection turned on. **Dated exception, owner action by 2026-11-22:** a repository setting (Settings, Code security) that the tools available to this work cannot change. The owner has taken it on.
 
 ## Gates
 
