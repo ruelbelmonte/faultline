@@ -52,6 +52,7 @@ Faultline does not terminate TLS itself. Calls from the proxy to an `https://` u
 
 ## Keeping other people's traffic safe
 
+- Set `control.allowed_hosts` to the hosts of the systems under test, for example `['*.qa.internal']`. Otherwise anyone holding the control token can make the control plane send requests to any host it can reach. Control logs a warning at startup when `environment` is `qa` and the list is empty.
 - Leave `control.allow_commands: false`. With it on, anyone holding the control token can run shell commands on the control host through `traffic.command`.
 - Leave `control.allow_unscoped: false`. Experiments with `scope: all` are then rejected, and every fault applies only to requests that carry the run id in `X-Chaos-Run`.
 - Requests from other users, other test suites and other run ids pass through untouched.
@@ -85,7 +86,7 @@ Logs are structured (`--log-format json`). They contain run ids, route names, me
 ## Checklist
 
 - [ ] The environment holds synthetic data only.
-- [ ] `environment: qa`, `control.allow_unscoped: false`, `control.allow_commands: false`.
+- [ ] `environment: qa`, `control.allow_unscoped: false`, `control.allow_commands: false`, `control.allowed_hosts` set.
 - [ ] Proxy and control run as separate workloads from the same config.
 - [ ] 7702 is reachable from the control plane only; 7701 from the services under test only.
 - [ ] 7700 is behind TLS and network restrictions.

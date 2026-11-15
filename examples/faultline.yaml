@@ -19,6 +19,7 @@ control:
   max_experiment_duration: 15m
   allow_unscoped: false
   allow_commands: false
+  allowed_hosts: []
 
 scope:
   header: X-Chaos-Run

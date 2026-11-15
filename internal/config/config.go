@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -45,6 +46,10 @@ type Config struct {
 	// anyone holding the control token can run shell commands on the
 	// control host.
 	AllowCommands bool
+	// AllowedHosts restricts the hosts that probe and traffic URLs may name
+	// (path.Match patterns on host or host:port). Empty allows any host
+	// except link-local and metadata addresses.
+	AllowedHosts []string
 
 	ScopeHeader       string
 	CorrelationHeader string
@@ -184,6 +189,15 @@ func Parse(data []byte) (*Config, error) {
 		}
 		if v, ok := m.Bool("allow_commands"); ok {
 			c.AllowCommands = v
+		}
+		for _, it := range m.Seq("allowed_hosts") {
+			if v, ok := it.Str(); ok {
+				v = strings.TrimSpace(v)
+				if _, err := path.Match(v, ""); err != nil || v == "" || strings.Contains(v, "/") {
+					errs.Add(it.Path, "must be a host or host:port pattern such as *.qa.internal or 10.0.0.5:8080")
+				}
+				c.AllowedHosts = append(c.AllowedHosts, v)
+			}
 		}
 		m.Done()
 	}
