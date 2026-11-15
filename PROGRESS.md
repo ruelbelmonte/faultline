@@ -596,3 +596,42 @@ From the continuation: aborting a run in the moment between its terminal status 
 3. A real MCP client and a real OpenAI-compatible server through the proxy, to check the two stretch features against something I did not write.
 4. A load test on separate machines, with streams and large bodies, repeated enough to give intervals.
 5. A screen reader pass over the dashboard.
+
+# Goal 1: security hardening and CI scanning
+
+Started 2026-11-14 from the repository audit; issues #9, #10, #12, #13, #11 and #23 (the P1 items of epics #5 and #6). One commit per issue on `claude/practical-maxwell-z68amm`, in pull request #37, because this session could push to one branch only.
+
+## Status
+
+| Issue | Commit | Status | Decision | Tests that would fail if it broke |
+|---|---|---|---|---|
+| #9 traffic.command opt-in | eaa9938 | Done | D101 | `TestCommandTrafficRejectedByDefault`, `TestAllowCommands`, `TestTrafficCommandRejectedByDefault` (integration) |
+| #10 tokens out of child environments | 79376e4 | Done | D102 | `TestEnvWithoutTokens`, `TestUpChildEnvTokens`, `TestTrafficCommandEnvHasNoTokens`, `TestUpChildrenGetOnlyTheTokensTheyNeed` (Linux, `/proc`) |
+| #12 upstream errors logged without URL | bdc00f1 | Done | D103 | `TestUpstreamErrorLogHasNoURL` (text and JSON) |
+| #13 redaction of bodies, commands, URLs | 72ef38a | Done | D104 | `TestRedactBodiesCommandsAndURLs`, `TestRedactURL`, `TestWarningsForCredentialsInURLs`, `TestRedactionOfSecrets` (integration, extended) |
+| #11 allowed_hosts and metadata block | 0d90f8e | Done | D105 | `TestCheckHostMetadataRefusedByDefault`, `TestCheckHostAllowList`, `TestAllowedIP`, `TestAllowedHostsConfig`, `TestHostAllowListInValidation`, `TestDialRefusesMetadataAddresses`, `TestHostWarning` |
+| #23 CI scanning | b50bbb7 | Done, except two repository settings (below) | D106 | The CI jobs themselves |
+
+Every new test was written before the fix and seen failing against the old code: build failures for new functions, and for behaviour, an explicit run with the fix reverted (#10's two integration tests, #12's log test, #13's integration test with the new redaction steps disabled, which reported the secret in the SQLite WAL, the saved experiment file and the experiments API).
+
+## Gates
+
+- Local, per commit, in a clean worktree with `GOTOOLCHAIN=go1.27.4`: `make lint`, `make test`, `go test -race` on the packages touched, `make test-integration`. Green for eaa9938 (#9), bdc00f1 (#10 and #12) and 0d90f8e (#13 and #11). b50bbb7 (#23) changes CI files, the Makefile and docs only; its gate is the CI run.
+- CI on pull request #37: CI_RESULT_PLACEHOLDER
+- `npm audit --audit-level=high`: 0 vulnerabilities, locally and in CI. govulncheck and both Trivy scans: no findings at or above their thresholds in the first CI run, so `.trivyignore.yaml` starts empty.
+
+One local environment problem, not a product defect: `go run honnef.co/go/tools/cmd/staticcheck@v0.8.2` under `GOTOOLCHAIN=auto` switched to go1.26 (staticcheck's own minimum) and then failed to analyse go1.27 sources. CI installs go1.27 directly and does not hit it. Locally, set `GOTOOLCHAIN=go1.27.4` (or newer) before `make lint`. `govulncheck` cannot run in this container at all, because the network policy refuses vuln.go.dev.
+
+## Not done, and why
+
+- **Secret scanning and push protection (#23).** They are repository settings, not files, and the goal allowed changes on a pull request branch only. Turn them on in Settings, Code security. On a public repository secret scanning may already be on; push protection should be checked.
+- **Base images pinned by digest.** Left to #24, which owns the release pipeline and asks for it.
+- **Acceptance suite.** The black-box suite in `faultline-acceptance/` is not in this repository and was not run. It may contain experiments with `traffic.command`, which now need `control.allow_commands: true` in its config.
+
+## New risks and consequences found
+
+- **The dashboard editor loses more than before (#13, D104).** Request bodies and commands now come back from `GET /api/v1/experiments/{name}` as fingerprints, so any experiment with a body has to be run from its file, and saving it from the editor writes the fingerprints over the file. Issue #15 (PUT overwrites the original) was P2; it should now be treated as P1.
+- **Fingerprints of guessable values (#13).** A plain SHA-256, as the issue asks, so a short body such as a lone weak password can be recovered by trying candidates. D104 records a keyed HMAC as the next step.
+- **Breaking change for command users (#9).** Existing experiments with `traffic.command` stop validating until `control.allow_commands: true` is set. Release notes for the next version need to say so.
+- **allowed_hosts covers experiments, not routes (#11).** Route upstreams come from `faultline.yaml` and are not checked against it; the metadata block does not apply to the proxy's own upstream connections. A config author can still point a route at a metadata address. That is a config-file trust question rather than a token-holder one, so it was left out; worth a follow-up issue if config files are not fully trusted.
+- **Error classes lose detail (#12).** Operators debugging a failing upstream now get `connection_refused` or `tls` instead of the full message, and have to reproduce against the upstream directly.
