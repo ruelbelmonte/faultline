@@ -614,9 +614,36 @@ Started 2026-11-14 from the repository audit; issues #9, #10, #12, #13, #11 and 
 
 Every new test was written before the fix and seen failing against the old code: build failures for new functions, and for behaviour, an explicit run with the fix reverted (#10's two integration tests, #12's log test, #13's integration test with the new redaction steps disabled, which reported the secret in the SQLite WAL, the saved experiment file and the experiments API).
 
+## Acceptance criteria, as written in each issue
+
+**#9**
+- [x] With `allow_commands` unset, an experiment with `traffic.command` posted to `/api/v1/runs` gets 400, and to `/api/v1/experiments/validate` gets `valid:false`, both with path `traffic.command`: `TestTrafficCommandRejectedByDefault` (integration), `TestCommandTrafficRejectedByDefault`.
+- [x] With `allow_commands: true`, the existing command-mode tests still pass: `TestTrafficCommand`, `TestCommandTraffic`.
+- [x] `faultline init` output stays valid: `TestInitOutputValidates`.
+
+**#10**
+- [x] A command that prints its environment shows neither token: `TestTrafficCommandEnvHasNoTokens` (integration, all 3 OSes), `TestEnvWithoutTokens`.
+- [x] The proxy child of `up` has no `FAULTLINE_TOKEN`: `TestUpChildrenGetOnlyTheTokensTheyNeed` (integration, Linux, from `/proc/<pid>/environ`), `TestUpChildEnvTokens`.
+
+**#12**
+- [x] An upstream failure with `?secret=abc` in the query: `abc` is absent from the proxy log in text and JSON formats: `TestUpstreamErrorLogHasNoURL`.
+
+**#13**
+- [x] A secret in a body, a command and a URL is absent from the SQLite database (and its WAL), all 4 report formats of both runs and the audit log (file and API): `TestRedactionOfSecrets` (integration), `TestRedactBodiesCommandsAndURLs`.
+
+**#11**
+- [x] Validation returns path-specific errors for disallowed hosts: `TestHostAllowListInValidation`.
+- [x] 169.254.169.254 is rejected by default: `TestCheckHostMetadataRefusedByDefault`, and at connect time `TestDialRefusesMetadataAddresses`.
+- [x] Docs updated: `docs/qa-deployment.md`, `docs/experiments.md`, README.
+
+**#23**
+- [x] All new jobs green on the pull request: run 43657493407.
+- [ ] The first Dependabot pull requests open. Not possible yet: Dependabot reads `.github/dependabot.yml` from the default branch only, so this happens after #37 merges.
+- [ ] Secret scanning and push protection turned on. A repository setting, needing the owner (see "Not done").
+
 ## Gates
 
-- Local, per commit, in a clean worktree with `GOTOOLCHAIN=go1.27.4`: `make lint`, `make test`, `go test -race` on the packages touched, `make test-integration`. Green for eaa9938 (#9), bdc00f1 (#10 and #12) and 0d90f8e (#13 and #11). b50bbb7 (#23) changes CI files, the Makefile and docs only; its gate is the CI run.
+- Local, per commit, in a clean worktree with `GOTOOLCHAIN=go1.27.4`: `make lint`, `make test`, `go test -race` on the packages touched, `make test-integration`. Green for every code commit on its own: eaa9938 (#9), 79376e4 (#10), bdc00f1 (#12), 72ef38a (#13) and 0d90f8e (#11). b50bbb7 (#23) changes CI files, the Makefile and docs only; its gate is the CI run.
 - CI on pull request #37: all 8 jobs green on ec079e9, run 43657004856 (https://github.com/ruelbelmonte/faultline/actions/runs/43657004856): `lint-and-unit` (vet, gofmt, staticcheck, unit tests, cross-compile for 6 targets), `govulncheck`, `race` (unit and integration), `integration` on ubuntu, macos and windows, `ui` (npm audit, committed build matches source, Playwright and axe in 3 browsers) and `docker` (both images built, Trivy scans of both, compose example). The first run, 43656566339 on b50bbb7, failed on macOS integration only, through a test defect described below.
 - `npm audit --audit-level=high`: 0 vulnerabilities, locally and in CI. govulncheck and both Trivy scans: no findings at or above their thresholds in the first CI run, so `.trivyignore.yaml` starts empty.
 
