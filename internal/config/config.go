@@ -50,7 +50,10 @@ type Config struct {
 	CorrelationHeader string
 
 	RedactionHeaders []string
-	StoreBodies      bool
+	// RedactionQueryParams are substrings of query parameter names whose
+	// values are redacted from stored URLs (compared case-insensitively).
+	RedactionQueryParams []string
+	StoreBodies          bool
 
 	RetryAmplificationThreshold float64
 
@@ -73,6 +76,7 @@ func Default() *Config {
 		ScopeHeader:                 "X-Chaos-Run",
 		CorrelationHeader:           "X-Chaos-Correlation",
 		RedactionHeaders:            []string{"authorization", "proxy-authorization", "x-api-key", "cookie", "set-cookie"},
+		RedactionQueryParams:        []string{"token", "key", "secret", "passw", "pwd", "auth", "sig", "session", "credential"},
 		RetryAmplificationThreshold: 3.0,
 	}
 }
@@ -203,6 +207,17 @@ func Parse(data []byte) (*Config, error) {
 			for _, it := range m.Seq("headers") {
 				if v, ok := it.Str(); ok {
 					c.RedactionHeaders = append(c.RedactionHeaders, strings.ToLower(headerName(&errs, it.Path, v)))
+				}
+			}
+		}
+		if m.Has("query_params") {
+			c.RedactionQueryParams = nil
+			for _, it := range m.Seq("query_params") {
+				if v, ok := it.Str(); ok {
+					if strings.TrimSpace(v) == "" {
+						errs.Add(it.Path, "must not be empty")
+					}
+					c.RedactionQueryParams = append(c.RedactionQueryParams, strings.ToLower(strings.TrimSpace(v)))
 				}
 			}
 		}

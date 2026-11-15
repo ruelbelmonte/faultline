@@ -33,6 +33,8 @@ correlation:
 
 redaction:
   headers: [authorization, proxy-authorization, x-api-key, cookie, set-cookie]
+  # values of URL query parameters whose names contain one of these are stored as REDACTED
+  query_params: [token, key, secret, passw, pwd, auth, sig, session, credential]
   store_bodies: false
 
 findings:
