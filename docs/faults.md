@@ -24,7 +24,7 @@ faults:
 A request is a candidate for a fault when all of these hold:
 
 - a run is injecting;
-- the scope matches: with `scope: header` the request's scope header equals the run id, with `scope: all` every request on the route qualifies;
+- the scope matches: with `scope: header` the request's run id equals the active run's, with `scope: all` every request on the route qualifies. The run id is the scope header (`X-Chaos-Run`) or, when the header is absent, the `chaos-run` entry of the W3C `baggage` header (`scope.baggage_key`); the correlation id likewise comes from `X-Chaos-Correlation` or `chaos-corr`;
 - the route matches;
 - `match.method` equals the request method, if set;
 - `match.path` matches the path after the route prefix, if set. `*` matches any run of characters including `/`, `?` matches one character. The query string is not part of the path;

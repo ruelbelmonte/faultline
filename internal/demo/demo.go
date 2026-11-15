@@ -31,7 +31,16 @@ type Options struct {
 	LLM               string
 	ScopeHeader       string
 	CorrelationHeader string
+	// Propagate is how the run id travels to downstream calls: PropagateHeaders
+	// forwards the scope and correlation headers (and baggage), PropagateBaggage
+	// forwards W3C baggage only, as an OpenTelemetry-instrumented service would.
+	Propagate string
 }
+
+const (
+	PropagateHeaders = "headers"
+	PropagateBaggage = "baggage"
+)
 
 type resilience struct {
 	timeout       time.Duration
@@ -195,9 +204,13 @@ func (a *app) call(in *http.Request, target string, out any) error {
 		if err != nil {
 			return err
 		}
-		for _, h := range []string{a.opts.ScopeHeader, a.opts.CorrelationHeader, "traceparent"} {
-			if v := in.Header.Get(h); v != "" {
-				req.Header.Set(h, v)
+		forward := []string{a.opts.ScopeHeader, a.opts.CorrelationHeader, "traceparent", "baggage"}
+		if a.opts.Propagate == PropagateBaggage {
+			forward = []string{"traceparent", "baggage"}
+		}
+		for _, h := range forward {
+			if v := in.Header.Values(h); len(v) > 0 {
+				req.Header[http.CanonicalHeaderKey(h)] = append([]string(nil), v...)
 			}
 		}
 		resp, err := a.client.Do(req)

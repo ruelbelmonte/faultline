@@ -30,8 +30,10 @@ control:
 
 scope:
   header: X-Chaos-Run         # header carrying the run id
+  baggage_key: chaos-run      # W3C baggage entry read when the header is absent; '' turns it off
 correlation:
   header: X-Chaos-Correlation # header grouping attempts of one logical request
+  baggage_key: chaos-corr
 
 redaction:
   headers: [authorization, proxy-authorization, x-api-key, cookie, set-cookie]

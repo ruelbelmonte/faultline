@@ -280,3 +280,17 @@ func TestTrustedProxies(t *testing.T) {
 		t.Fatal("trusted_proxies must default to empty")
 	}
 }
+
+func TestBaggageKeys(t *testing.T) {
+	c, err := Parse([]byte("version: 1\n"))
+	if err != nil || c.ScopeBaggageKey != "chaos-run" || c.CorrelationBaggageKey != "chaos-corr" {
+		t.Fatalf("defaults: %v %+v", err, c)
+	}
+	c, err = Parse([]byte("version: 1\nscope:\n  baggage_key: ''\ncorrelation:\n  baggage_key: my-corr\n"))
+	if err != nil || c.ScopeBaggageKey != "" || c.CorrelationBaggageKey != "my-corr" {
+		t.Fatalf("override and off: %v %+v", err, c)
+	}
+	if _, err := Parse([]byte("version: 1\nscope:\n  baggage_key: 'not a token'\n")); err == nil || !strings.Contains(err.Error(), "scope.baggage_key") {
+		t.Fatalf("an invalid key must be rejected at scope.baggage_key: %v", err)
+	}
+}
