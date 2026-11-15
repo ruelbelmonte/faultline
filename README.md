@@ -125,7 +125,7 @@ faultline validate <file|dir> [--config FILE]
 faultline up [--config FILE]
 faultline proxy [--config FILE]
 faultline control [--config FILE]
-faultline run <file|dir> [--fail-on-breach] [--report-dir DIR] [--format json,md,html,junit] [--url URL]
+faultline run <file|dir> [--fail-on-breach] [--fail-on-regression] [--baseline previous|last-passed|RUN_ID] [--report-dir DIR] [--format json,md,html,junit] [--url URL]
 faultline status [--url URL]
 faultline stop [--url URL]
 faultline report <run_id> --format F [--out FILE] [--url URL]
@@ -149,10 +149,13 @@ Exit codes of `faultline run`:
 | 10 | With `--fail-on-breach`: a run failed |
 | 11 | With `--fail-on-breach`: a run was inconclusive |
 | 12 | With `--fail-on-breach`: a run was aborted |
-| 2 | Invalid experiment or usage error |
+| 13 | With `--fail-on-regression`: a run regressed against its baseline |
+| 2 | Invalid experiment, unusable baseline, or usage error |
 | 1 | Internal or connection error |
 
-Across several files the worst result wins: 12, then 10, then 11, then 0. `--report-dir` writes `DIR/<run_id>/report.json`, `report.md`, `report.html` and `report.xml` (JUnit). `faultline stop` is the kill switch: it clears every fault and aborts the active run.
+Across several files the worst result wins: 12, then 10, then 11, then 13, then 0. A regression ranks below the verdicts: a failed, inconclusive or aborted run says more than a comparison.
+
+Every finished run is compared with an earlier run of the same experiment (same name and same experiment file), by default the previous one. `--baseline last-passed` picks the latest passed run instead, and `--baseline RUN_ID` any finished run of the same experiment. The comparison is in the JSON and Markdown reports and in the dashboard; a run regressed when its verdict went from passed to anything else, a hypothesis threshold that passed now fails, or a finding appeared. See [docs/experiments.md](docs/experiments.md#comparison-with-earlier-runs). `--report-dir` writes `DIR/<run_id>/report.json`, `report.md`, `report.html` and `report.xml` (JUnit). `faultline stop` is the kill switch: it clears every fault and aborts the active run.
 
 ## Safety model
 

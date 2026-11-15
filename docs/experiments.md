@@ -145,6 +145,24 @@ A fingerprint is a plain SHA-256. A short or guessable value (a weak password on
 
 The request `body` is stored as part of the experiment. Keep it synthetic.
 
+## Comparison with earlier runs
+
+When a run finishes, control compares it with a baseline and adds a `comparison` block to its document (null when there is no baseline). Runs are grouped by experiment name and `yaml_sha256`, so editing the experiment file starts a new series.
+
+| Baseline | Chosen with | Which run |
+|---|---|---|
+| `previous` (default) | nothing, or `--baseline previous` | The latest finished run with the same name and `yaml_sha256` |
+| `last-passed` | `--baseline last-passed` | The latest such run whose verdict was `passed` |
+| explicit | `--baseline RUN_ID` | That run, which must be finished and of the same experiment name; the file may differ (`same_experiment_yaml: false`) |
+
+The block holds the baseline's run id, verdict and start time, the change per hypothesis value (`baseline_observed`, `observed`, `delta`), the change in triggers per fault, the findings that appeared and those no longer present (by rule id and route), and `regression` with its reasons. A run regressed when any of these holds:
+
+- the baseline's verdict was `passed` and this run's is not;
+- a hypothesis threshold that passed in the baseline fails now;
+- a finding appears that the baseline did not have.
+
+The comparison carries ids, numbers and verdicts only, never finding detail, evidence or experiment text, so nothing that redaction removed can reach it. `faultline run --fail-on-regression` exits 13 when a run regressed. The Markdown report has a "Compared with" section, and the dashboard shows the comparison on the run page and a per-experiment history in the experiments editor.
+
 ## Reports
 
 `faultline run --report-dir DIR` writes `DIR/<run_id>/report.{json,md,html,xml}`; control also writes them to `{data_dir}/reports/<run_id>/`. All four come from the same JSON document, which is also what `GET /api/v1/runs/{id}` returns.

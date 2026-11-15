@@ -194,10 +194,83 @@ func Markdown(doc *Document) string {
 			fmt.Fprintf(&b, "| %s | %d | %d |\n", name, doc.Metrics.Proxy[name].Requests, doc.Metrics.Proxy[name].Faulted)
 		}
 	}
+	if Terminal(doc.Status) {
+		markdownComparison(&b, doc.Comparison)
+	}
 	if doc.Redaction.Enabled {
 		fmt.Fprintf(&b, "\nHeader values redacted: %s. Bodies are never stored.\n", strings.Join(doc.Redaction.Headers, ", "))
 	}
 	return b.String()
+}
+
+func markdownComparison(b *strings.Builder, c *Comparison) {
+	if c == nil {
+		b.WriteString("\n## Comparison\n\nNo earlier run of this experiment to compare with.\n")
+		return
+	}
+	baseVerdict := "unknown"
+	if c.BaselineVerdict != nil {
+		baseVerdict = *c.BaselineVerdict
+	}
+	fmt.Fprintf(b, "\n## Compared with `%s`\n\n", c.BaselineRunID)
+	fmt.Fprintf(b, "Baseline: %s run, verdict %s, started %s.", c.BaselineSelection, baseVerdict, c.BaselineStartedAt.UTC().Format("2006-01-02 15:04:05 UTC"))
+	if !c.SameExperimentYAML {
+		b.WriteString(" The experiment file differs from the baseline's.")
+	}
+	b.WriteString("\n\n")
+	if c.Regression {
+		b.WriteString("**Regression:**\n\n")
+		for _, r := range c.RegressionReasons {
+			fmt.Fprintf(b, "- %s\n", mdCell(r))
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("No regression.\n\n")
+	}
+	if len(c.Hypothesis) > 0 {
+		b.WriteString("| Threshold | Baseline | Now | Change |\n|---|---|---|---|\n")
+		for _, h := range c.Hypothesis {
+			delta := "n/a"
+			if h.Delta != nil {
+				delta = signed(*h.Delta)
+			}
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", h.Name, optNum(h.BaselineObserved, "no data"), optNum(h.Observed, "no data"), delta)
+		}
+		b.WriteString("\n")
+	}
+	if len(c.Faults) > 0 {
+		b.WriteString("| Fault | Baseline triggers | Now | Change |\n|---|---|---|---|\n")
+		for _, f := range c.Faults {
+			baseT, delta := "n/a", "n/a"
+			if f.BaselineTriggers != nil {
+				baseT, delta = fmt.Sprint(*f.BaselineTriggers), fmt.Sprintf("%+d", *f.Delta)
+			}
+			fmt.Fprintf(b, "| %s | %s | %d | %s |\n", mdCell(f.ID), baseT, f.Triggers, delta)
+		}
+		b.WriteString("\n")
+	}
+	refs := func(title string, rs []FindingRef) {
+		if len(rs) == 0 {
+			return
+		}
+		fmt.Fprintf(b, "%s: ", title)
+		for i, r := range rs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(b, "`%s`", mdCell(r.String()))
+		}
+		b.WriteString("\n\n")
+	}
+	refs("Findings that appeared", c.FindingsAppeared)
+	refs("Findings no longer present", c.FindingsResolved)
+}
+
+func signed(v float64) string {
+	if v > 0 {
+		return "+" + num(v)
+	}
+	return num(v)
 }
 
 func recoveryUnit(doc *Document) string {

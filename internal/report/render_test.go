@@ -73,7 +73,7 @@ func TestJSONMatchesCanonicalSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"schema_version", "run_id", "experiment", "environment", "status", "verdict", "reason", "started_at", "ended_at",
-		"hypothesis", "faults", "findings", "metrics", "recovery_seconds", "redaction"}
+		"hypothesis", "faults", "findings", "metrics", "recovery_seconds", "redaction", "comparison"}
 	if len(m) != len(want) {
 		t.Fatalf("top-level keys: got %d, want %d", len(m), len(want))
 	}
@@ -81,6 +81,9 @@ func TestJSONMatchesCanonicalSchema(t *testing.T) {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing key %q", k)
 		}
+	}
+	if v, ok := m["comparison"]; !ok || v != nil {
+		t.Fatalf("comparison must be an explicit null when there is no baseline: %v", v)
 	}
 	if m["started_at"] != "2026-01-02T03:04:05Z" || m["ended_at"] != "2026-01-02T03:04:45Z" || m["reason"] != nil {
 		t.Fatalf("timestamps or reason: %v %v %v", m["started_at"], m["ended_at"], m["reason"])

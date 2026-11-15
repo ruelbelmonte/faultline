@@ -157,6 +157,23 @@ export interface RunSummary {
   status: string
   verdict: string | null
   started_at: string
+  error_rate?: number | null
+  p95_ms?: number | null
+  regression?: boolean | null
+}
+
+export interface Comparison {
+  baseline_run_id: string
+  baseline_selection: string
+  baseline_verdict: string | null
+  baseline_started_at: string
+  same_experiment_yaml: boolean
+  hypothesis: { name: string; baseline_observed: number | null; observed: number | null; delta: number | null; baseline_passed: boolean | null; passed: boolean }[]
+  faults: { id: string; baseline_triggers: number | null; triggers: number; delta: number | null }[]
+  findings_appeared: { id: string; route?: string; severity: string }[]
+  findings_resolved: { id: string; route?: string; severity: string }[]
+  regression: boolean
+  regression_reasons: string[]
 }
 
 export interface HypothesisEntry {
@@ -202,6 +219,7 @@ export interface RunDocument {
   }
   recovery_seconds: number | null
   redaction: { enabled: boolean; headers: string[] }
+  comparison?: Comparison | null
 }
 
 export interface Point {

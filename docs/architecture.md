@@ -109,8 +109,8 @@ While a run is active, control keeps the part of each of its request records tha
 | GET | `/api/v1/experiments/{name}` | `{name, file, yaml}` (redacted: see Redaction in docs/experiments.md) |
 | PUT | `/api/v1/experiments/{name}` | Body `{yaml}`. Validates, then writes `{experiments_dir}/{name}.yaml`. 400 when invalid |
 | POST | `/api/v1/experiments/validate` | Body `{yaml}`. `{valid, errors:[{path, message}], warnings:[{path, message}]}`, always 200 |
-| POST | `/api/v1/runs` | Body `{experiment_yaml}`. 201 `{run_id}`, 400 invalid, 409 a run is active |
-| GET | `/api/v1/runs` | Newest first: `[{run_id, experiment, status, verdict, started_at}]` |
+| POST | `/api/v1/runs` | Body `{experiment_yaml, baseline?}`; `baseline` is `previous` (default), `last-passed` or a run id. 201 `{run_id}`, 400 invalid (`invalid_experiment` or `invalid_baseline`), 409 a run is active |
+| GET | `/api/v1/runs?experiment=` | Newest first, optionally one experiment's: `[{run_id, experiment, status, verdict, started_at, error_rate, p95_ms, regression}]`; the last three are null until a run finishes or when it has no comparison |
 | GET | `/api/v1/runs/{id}` | The run document, same schema as the JSON report |
 | GET | `/api/v1/runs/{id}/timeseries` | `{bucket_seconds, series, phases, fault_windows, markers}` |
 | GET | `/api/v1/runs/{id}/events` | Server-sent events: `status`, `metrics`, `finding`. Ends when the run does |

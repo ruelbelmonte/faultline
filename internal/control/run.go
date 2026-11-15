@@ -47,6 +47,9 @@ type Run struct {
 	exp     *experiment.Experiment
 	yaml    []byte // redacted copy; the only form that is persisted
 	leaseID string
+	// baseline is the comparison baseline asked for at creation:
+	// report.BaselinePrevious, report.BaselineLastPassed or a run id.
+	baseline string
 
 	ctx    context.Context
 	cancel context.CancelCauseFunc
@@ -697,6 +700,7 @@ func (r *Run) finalize(precheckFailed bool) {
 	final := statusEvent{r.id, r.doc.Status, r.doc.Verdict, r.doc.Reason}
 	r.mu.Unlock()
 
+	r.compare()
 	r.persist()
 	r.c.writeReports(r.id)
 	for _, f := range found {
@@ -816,4 +820,32 @@ func (r *Run) verdictLocked(cause *abortCause, precheckFailed bool) (verdict, re
 		}
 	}
 	return report.VerdictPassed, ""
+}
+
+// compare adds the run-over-run block to a finished run's document: the
+// baseline asked for at creation, compared on ids, numbers and verdicts only.
+// No baseline (a first run, or no earlier passed run) leaves it null.
+func (r *Run) compare() {
+	r.mu.Lock()
+	name, sha := r.doc.Experiment.Name, r.doc.Experiment.YAMLSHA256
+	r.mu.Unlock()
+
+	var base *report.Document
+	var err error
+	switch r.baseline {
+	case report.BaselinePrevious, report.BaselineLastPassed:
+		base, err = r.c.store.LatestFinished(name, sha, r.id, r.baseline == report.BaselineLastPassed)
+	default:
+		base, _, err = r.c.store.Run(r.baseline)
+	}
+	if err != nil {
+		r.c.log.Error("reading the comparison baseline failed; the report has no comparison", "run_id", r.id, "error", err.Error())
+		return
+	}
+	if base == nil {
+		return
+	}
+	r.mu.Lock()
+	r.doc.Comparison = report.Compare(&r.doc, base, r.baseline)
+	r.mu.Unlock()
 }

@@ -229,8 +229,13 @@ func TestReports(t *testing.T) {
 		if string(a) != string(b) {
 			t.Fatalf("the JSON report and the run document must be the same document:\n%s\n%s", a, b)
 		}
-		if len(fromReport) != 15 {
-			t.Fatalf("the document has %d top-level keys, the schema has 15", len(fromReport))
+		// PRD 10.1's 15 keys plus comparison (D107), which is null for this
+		// experiment's first run.
+		if len(fromReport) != 16 {
+			t.Fatalf("the document has %d top-level keys, the schema has 16", len(fromReport))
+		}
+		if v, ok := fromReport["comparison"]; !ok || v != nil {
+			t.Fatalf("comparison must be present and null for a first run: %v", v)
 		}
 	})
 

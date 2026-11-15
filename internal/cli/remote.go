@@ -32,6 +32,7 @@ const (
 	exitFailed       = 10
 	exitInconclusive = 11
 	exitAborted      = 12
+	exitRegression   = 13
 )
 
 // runIDRE is the only shape of run id the CLI puts into a URL or a file path.
@@ -55,9 +56,10 @@ type remote struct {
 }
 
 type apiError struct {
-	Status int
-	Code   string
-	Errors yamlx.Errors
+	Status  int
+	Code    string
+	Message string
+	Errors  yamlx.Errors
 }
 
 func (e *apiError) Error() string {
@@ -66,6 +68,9 @@ func (e *apiError) Error() string {
 		return "the control plane rejected the token (401); check FAULTLINE_TOKEN"
 	case http.StatusConflict:
 		return "conflict (409): " + e.Code
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("control plane answered %d %s: %s", e.Status, e.Code, e.Message)
 	}
 	return fmt.Sprintf("control plane answered %d %s", e.Status, e.Code)
 }
@@ -130,11 +135,12 @@ func (r *remote) call(ctx context.Context, method, path string, body, out any) e
 	if resp.StatusCode >= 300 {
 		ae := &apiError{Status: resp.StatusCode}
 		var parsed struct {
-			Error  string       `json:"error"`
-			Errors yamlx.Errors `json:"errors"`
+			Error   string       `json:"error"`
+			Message string       `json:"message"`
+			Errors  yamlx.Errors `json:"errors"`
 		}
 		if json.Unmarshal(data, &parsed) == nil {
-			ae.Code, ae.Errors = parsed.Error, parsed.Errors
+			ae.Code, ae.Message, ae.Errors = parsed.Error, parsed.Message, parsed.Errors
 		}
 		return ae
 	}
@@ -301,6 +307,8 @@ func (e *env) cmdRun(args []string) int {
 	failOnBreach := fs.Bool("fail-on-breach", false, "exit 10 failed, 11 inconclusive, 12 aborted")
 	reportDir := fs.String("report-dir", "", "write reports to DIR/<run_id>/")
 	formatList := fs.String("format", "", "report formats: json,md,html,junit (default: all four)")
+	baseline := fs.String("baseline", "", "compare each run with: previous (default), last-passed, or a run id")
+	failOnRegression := fs.Bool("fail-on-regression", false, "exit 13 when a run regressed against its baseline")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return exitUsage
@@ -322,6 +330,11 @@ func (e *env) cmdRun(args []string) int {
 			formats = append(formats, f)
 		}
 	}
+	switch b := *baseline; {
+	case b == "", b == report.BaselinePrevious, b == report.BaselineLastPassed, runIDRE.MatchString(b):
+	default:
+		return e.usageErr("--baseline must be previous, last-passed or a run id")
+	}
 	files, err := experimentFiles(pos[0])
 	if err != nil {
 		return e.usageErr("%v", err)
@@ -334,9 +347,12 @@ func (e *env) cmdRun(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	type outcome struct{ file, runID, verdict, reason string }
+	type outcome struct {
+		file, runID, verdict, reason string
+		regression                   bool
+	}
 	var outcomes []outcome
-	worst := exitOK
+	worst, regressed := exitOK, false
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -346,8 +362,16 @@ func (e *env) cmdRun(args []string) int {
 		var created struct {
 			RunID string `json:"run_id"`
 		}
-		err = r.call(ctx, http.MethodPost, "/api/v1/runs", map[string]string{"experiment_yaml": string(data)}, &created)
+		body := map[string]string{"experiment_yaml": string(data)}
+		if *baseline != "" {
+			body["baseline"] = *baseline
+		}
+		err = r.call(ctx, http.MethodPost, "/api/v1/runs", body, &created)
 		var ae *apiError
+		if errors.As(err, &ae) && ae.Status == http.StatusBadRequest && ae.Code == "invalid_baseline" {
+			fmt.Fprintf(e.stderr, "faultline: %s: %s\n", file, ae.Message)
+			return exitUsage
+		}
 		if errors.As(err, &ae) && ae.Status == http.StatusBadRequest {
 			fmt.Fprintf(e.stderr, "faultline: %s is invalid:\n", file)
 			for _, v := range ae.Errors {
@@ -406,6 +430,8 @@ func (e *env) cmdRun(args []string) int {
 		if doc.Reason != nil {
 			o.reason = *doc.Reason
 		}
+		o.regression = doc.Comparison != nil && doc.Comparison.Regression
+		regressed = regressed || o.regression
 		outcomes = append(outcomes, o)
 		worst = worse(worst, verdictExit(o.verdict))
 	}
@@ -417,13 +443,20 @@ func (e *env) cmdRun(args []string) int {
 			if o.reason != "" {
 				line += " (" + o.reason + ")"
 			}
+			if o.regression {
+				line += " REGRESSION"
+			}
 			fmt.Fprintln(e.stdout, line)
 		}
 	}
+	code := exitOK
 	if *failOnBreach {
-		return worst
+		code = worst
 	}
-	return exitOK
+	if *failOnRegression && regressed {
+		code = worse(code, exitRegression)
+	}
+	return code
 }
 
 func verdictExit(verdict string) int {
@@ -440,9 +473,11 @@ func verdictExit(verdict string) int {
 	return exitInternal
 }
 
-// worse orders exit codes 12 > 10 > 11 > 0; an internal error outranks all.
+// worse orders exit codes 12 > 10 > 11 > 13 > 0; an internal error outranks
+// all. A regression (13) ranks lowest: a failed, inconclusive or aborted run
+// says more than a comparison does.
 func worse(a, b int) int {
-	rank := map[int]int{exitOK: 0, exitInconclusive: 1, exitFailed: 2, exitAborted: 3, exitInternal: 4}
+	rank := map[int]int{exitOK: 0, exitRegression: 1, exitInconclusive: 2, exitFailed: 3, exitAborted: 4, exitInternal: 5}
 	if rank[b] > rank[a] {
 		return b
 	}
@@ -534,5 +569,17 @@ func (e *env) summary(doc *report.Document) {
 	}
 	if doc.RecoverySeconds != nil {
 		fmt.Fprintf(e.stdout, "  recovery: %v s\n", *doc.RecoverySeconds)
+	}
+	c := doc.Comparison
+	switch {
+	case c == nil:
+		fmt.Fprintln(e.stdout, "  compared with: no earlier run of this experiment")
+	case c.Regression:
+		fmt.Fprintf(e.stdout, "  compared with %s (%s): REGRESSION\n", c.BaselineRunID, c.BaselineSelection)
+		for _, reason := range c.RegressionReasons {
+			fmt.Fprintf(e.stdout, "    - %s\n", reason)
+		}
+	default:
+		fmt.Fprintf(e.stdout, "  compared with %s (%s): no regression\n", c.BaselineRunID, c.BaselineSelection)
 	}
 }

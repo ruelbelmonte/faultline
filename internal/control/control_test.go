@@ -97,7 +97,7 @@ func TestStore(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runs, err := s.Runs()
+	runs, err := s.Runs("")
 	if err != nil || len(runs) != 2 || runs[0].RunID != "run_b" || runs[1].RunID != "run_a" {
 		t.Fatalf("runs must be listed newest first: %+v (%v)", runs, err)
 	}
@@ -113,7 +113,7 @@ func TestStore(t *testing.T) {
 	if unfinished, _ = s.Unfinished(); len(unfinished) != 0 {
 		t.Fatalf("still unfinished after update: %v", unfinished)
 	}
-	if runs, _ = s.Runs(); len(runs) != 2 || runs[0].RunID != "run_b" {
+	if runs, _ = s.Runs(""); len(runs) != 2 || runs[0].RunID != "run_b" {
 		t.Fatalf("an update must not reorder or duplicate runs: %+v", runs)
 	}
 	if _, _, err := s.Run("run_nope"); err != ErrNotFound {
@@ -157,5 +157,69 @@ func TestBucketRoundTripsAndAggregatesRoutes(t *testing.T) {
 	p := got[0].Point()
 	if p.Driver.Requests != 10 || p.Driver.Errors != 2 || p.Driver.P95Ms != 42.5 || p.Proxy.Requests != 5 || p.Proxy.Faulted != 3 || p.Probes.OK != 4 || p.Probes.Fail != 1 {
 		t.Fatalf("unexpected point: %+v", p)
+	}
+}
+
+// Issue #28: baselines are found by experiment name and yaml_sha256, the runs
+// list filters by experiment and carries the key figures of finished runs.
+func TestStoreBaselinesAndHistory(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	passed, failed := report.VerdictPassed, report.VerdictFailed
+	regressed := true
+	mk := func(id, name, sha, status string, verdict *string) report.Document {
+		return report.Document{RunID: id, Status: status, Verdict: verdict, StartedAt: report.At(time.Now()),
+			Experiment: report.ExperimentInfo{Name: name, YAMLSHA256: sha},
+			Metrics:    report.Metrics{Driver: report.DriverMetrics{ErrorRate: 0.25, P95Ms: 120}}}
+	}
+	docs := []report.Document{
+		mk("run_p1", "cmp", "sha1", report.StatusCompleted, &passed),
+		mk("run_x1", "cmp", "sha2", report.StatusCompleted, &passed), // other file version
+		mk("run_f1", "cmp", "sha1", report.StatusCompleted, &failed),
+		mk("run_o1", "other", "sha1", report.StatusCompleted, &passed),
+		mk("run_live", "cmp", "sha1", report.StatusInjecting, nil),
+	}
+	docs[2].Comparison = &report.Comparison{BaselineRunID: "run_p1", Regression: regressed}
+	for i := range docs {
+		if err := s.SaveRun(&docs[i], &Meta{}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.LatestFinished("cmp", "sha1", "run_live", false)
+	if err != nil || got == nil || got.RunID != "run_f1" {
+		t.Fatalf("previous: %+v %v", got, err)
+	}
+	got, _ = s.LatestFinished("cmp", "sha1", "run_live", true)
+	if got == nil || got.RunID != "run_p1" {
+		t.Fatalf("last passed: %+v", got)
+	}
+	if got, _ = s.LatestFinished("cmp", "sha9", "", false); got != nil {
+		t.Fatalf("no run of that file version: %+v", got)
+	}
+	runs, _ := s.Runs("cmp")
+	if len(runs) != 4 {
+		t.Fatalf("filtered history: %+v", runs)
+	}
+	for _, r := range runs {
+		if r.Experiment != "cmp" {
+			t.Fatalf("leak: %+v", r)
+		}
+		switch r.RunID {
+		case "run_live":
+			if r.ErrorRate != nil || r.Regression != nil {
+				t.Fatalf("an unfinished run has no final figures: %+v", r)
+			}
+		case "run_f1":
+			if r.ErrorRate == nil || *r.ErrorRate != 0.25 || r.P95Ms == nil || *r.P95Ms != 120 || r.Regression == nil || !*r.Regression {
+				t.Fatalf("figures of a finished, regressed run: %+v", r)
+			}
+		case "run_p1":
+			if r.Regression != nil {
+				t.Fatalf("a run without a comparison has no regression flag: %+v", r)
+			}
+		}
 	}
 }
