@@ -157,9 +157,12 @@ func (e *env) cmdValidate(args []string) int {
 		if err != nil {
 			return e.usageErr("%v", err)
 		}
-		_, errs := experiment.Parse(data, cfg)
+		exp, errs := experiment.Parse(data, cfg)
 		if len(errs) == 0 {
 			fmt.Fprintf(e.stdout, "%s: valid\n", f)
+			for _, w := range experiment.Warnings(exp) {
+				fmt.Fprintf(e.stdout, "warning: %s\n", w.String())
+			}
 			continue
 		}
 		invalid++

@@ -896,20 +896,24 @@ func TestRunEventsStream(t *testing.T) {
 func TestRedactionOfSecrets(t *testing.T) {
 	const secret = "s3cr3t-itest-9f3a7c21-do-not-store"
 	var mu sync.Mutex
-	seen := map[string]int{}
+	seen, bodies, queries := map[string]int{}, map[string]int{}, map[string]int{}
 	sut := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		seen[r.Header.Get("Authorization")+"|"+r.Header.Get("Cookie")+"|"+r.Header.Get("X-Api-Key")]++
+		bodies[string(body)]++
+		queries[r.URL.RawQuery]++
 		mu.Unlock()
-		io.Copy(io.Discard, r.Body)
 		w.Write([]byte("ok"))
 	}))
 	defer sut.Close()
 
-	f := startFull(t, "naive")
+	// Issue #13: allow_commands so that a command run can carry the secret too.
+	f := startFull(t, "naive", func(s *stack) { s.controlExtra = "  allow_commands: true\n" })
+	withUserinfo := strings.Replace(sut.URL, "http://", "http://svc-user:"+secret+"@", 1)
 	yaml := f.experiment(t, expOpts{
 		Name:    "redaction",
-		BaseURL: sut.URL,
+		BaseURL: withUserinfo,
 		Requests: `    - method: POST
       path: /thing
       headers:
@@ -917,8 +921,8 @@ func TestRedactionOfSecrets(t *testing.T) {
         cookie: "session=` + secret + `"
         X-API-KEY: ` + secret + `
         X-Harmless: visible-value
-      body: '{"n":1}'`,
-		Probes: "    - {name: sut, url: " + sut.URL + "/health, interval: 200ms}",
+      body: '{"n":1,"password":"` + secret + `"}'`,
+		Probes: "    - {name: sut, url: '" + sut.URL + "/health?verbose=1&api_token=" + secret + "', interval: 200ms}",
 		Faults: `  - id: f1
     type: http_error
     route: llm
@@ -947,6 +951,28 @@ func TestRedactionOfSecrets(t *testing.T) {
 		t.Fatalf("the driver must send the real header values; saw %v", seen)
 	}
 
+	// The driver sent the real body, and the probe the real query (issue #13).
+	mu.Lock()
+	gotBody, gotQuery := bodies[`{"n":1,"password":"`+secret+`"}`], queries["verbose=1&api_token="+secret]
+	mu.Unlock()
+	if gotBody == 0 || gotQuery == 0 {
+		t.Fatalf("the run must send the real body and probe query; bodies %d, queries %d", gotBody, gotQuery)
+	}
+
+	// A command run carrying the secret (issue #13).
+	cmdYAML := `version: 1
+name: redaction-command
+target: {route: inventory}
+duration: 1s
+traffic:
+  command: 'echo ` + secret + `'
+recovery: {timeout: 1s}
+faults:
+  - {id: f1, type: latency, params: {ms: 1}}
+`
+	cmdID := f.control.createRun(t, cmdYAML)
+	f.control.waitDone(t, cmdID, 30*time.Second)
+
 	// Saving through the API must not write the secret either.
 	if code := f.control.api(t, "PUT", "/api/v1/experiments/redaction", obj{"yaml": yaml}, nil); code != 200 {
 		t.Fatalf("PUT: %d", code)
@@ -964,6 +990,8 @@ func TestRedactionOfSecrets(t *testing.T) {
 		"/api/v1/audit", "/api/v1/experiments", "/api/v1/experiments/redaction", "/api/v1/faults/active", "/api/v1/routes",
 		"/api/v1/runs/" + id + "/report?format=json", "/api/v1/runs/" + id + "/report?format=md",
 		"/api/v1/runs/" + id + "/report?format=html", "/api/v1/runs/" + id + "/report?format=junit",
+		"/api/v1/runs/" + cmdID, "/api/v1/runs/" + cmdID + "/report?format=json", "/api/v1/runs/" + cmdID + "/report?format=md",
+		"/api/v1/runs/" + cmdID + "/report?format=html", "/api/v1/runs/" + cmdID + "/report?format=junit",
 	} {
 		req, _ := http.NewRequest("GET", f.control.url(path), nil)
 		req.Header.Set("Authorization", "Bearer "+controlToken)

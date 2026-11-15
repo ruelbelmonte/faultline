@@ -72,7 +72,7 @@ type Run struct {
 }
 
 func newRun(c *Control, exp *experiment.Experiment, rawYAML []byte) *Run {
-	redacted := experiment.Redact(rawYAML, c.cfg.RedactionHeaders)
+	redacted := experiment.Redact(rawYAML, c.cfg)
 	sum := sha256.Sum256(redacted)
 	now := time.Now()
 	r := &Run{

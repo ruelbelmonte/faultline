@@ -27,6 +27,7 @@ correlation:
 
 redaction:
   headers: [authorization, proxy-authorization, x-api-key, cookie, set-cookie]
+  query_params: [token, key, secret, passw, pwd, auth, sig, session, credential]
   store_bodies: false
 
 findings:

@@ -152,7 +152,7 @@ func (c *Control) handleExperimentGet(w http.ResponseWriter, r *http.Request) {
 		// Shown as stored on disk except for sensitive header values.
 		writeJSON(w, http.StatusOK, map[string]string{
 			"name": name, "file": name + ext,
-			"yaml": string(experiment.Redact(data, c.cfg.RedactionHeaders)),
+			"yaml": string(experiment.Redact(data, c.cfg)),
 		})
 		return
 	}
@@ -181,7 +181,7 @@ func (c *Control) handleExperimentPut(w http.ResponseWriter, r *http.Request) {
 	}
 	file := name + ".yaml"
 	// Control never writes sensitive header values to disk, here included.
-	data := experiment.Redact([]byte(body.YAML), c.cfg.RedactionHeaders)
+	data := experiment.Redact([]byte(body.YAML), c.cfg)
 	if err := os.WriteFile(filepath.Join(c.cfg.ExperimentsDir, file), data, 0o644); err != nil {
 		writeError(w, http.StatusInternalServerError, "write_failed")
 		return
@@ -197,11 +197,15 @@ func (c *Control) handleValidate(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	_, errs := experiment.Parse([]byte(body.YAML), c.cfg)
+	e, errs := experiment.Parse([]byte(body.YAML), c.cfg)
 	if errs == nil {
 		errs = yamlx.Errors{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": len(errs) == 0, "errors": errs})
+	warnings := yamlx.Errors{}
+	if e != nil {
+		warnings = append(warnings, experiment.Warnings(e)...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"valid": len(errs) == 0, "errors": errs, "warnings": warnings})
 }
 
 func (c *Control) handleRunCreate(w http.ResponseWriter, r *http.Request) {

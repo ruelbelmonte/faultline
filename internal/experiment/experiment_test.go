@@ -1,6 +1,7 @@
 package experiment
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -343,7 +344,7 @@ faults:
 func TestRedact(t *testing.T) {
 	doc := strings.Replace(base, "headers: {}", "headers: {Authorization: Bearer s3cr3t-value, X-Trace: keep-me}", 1)
 	doc = strings.Replace(doc, "status: 503", "status: 503\n      headers: {Set-Cookie: session=s3cr3t-cookie}", 1)
-	out := string(Redact([]byte(doc), testConfig().RedactionHeaders))
+	out := string(Redact([]byte(doc), testConfig()))
 	if strings.Contains(out, "s3cr3t") {
 		t.Fatalf("secret survived redaction:\n%s", out)
 	}
@@ -356,7 +357,7 @@ func TestRedact(t *testing.T) {
 }
 
 func TestRedactLeavesCleanDocumentUntouched(t *testing.T) {
-	if out := Redact([]byte(base), testConfig().RedactionHeaders); string(out) != base {
+	if out := Redact([]byte(base), testConfig()); string(out) != base {
 		t.Fatal("a document with nothing to redact must be returned byte for byte")
 	}
 }
@@ -420,12 +421,103 @@ faults:
 			if _, errs := Parse([]byte(doc), testConfig()); len(errs) == 0 {
 				t.Fatal("expected a validation error")
 			}
-			if out := string(Redact([]byte(doc), testConfig().RedactionHeaders)); strings.Contains(out, "s3cr3t") {
+			if out := string(Redact([]byte(doc), testConfig())); strings.Contains(out, "s3cr3t") {
 				t.Fatalf("secret survived redaction:\n%s", out)
 			}
 		})
 	}
-	if out := string(Redact([]byte("name: [unclosed s3cr3t"), nil)); strings.Contains(out, "s3cr3t") {
+	if out := string(Redact([]byte("name: [unclosed s3cr3t"), testConfig())); strings.Contains(out, "s3cr3t") {
 		t.Fatalf("an unparseable document must not be stored as is: %s", out)
+	}
+}
+
+// Issue #13: request bodies and commands are stored as a fingerprint, URL
+// userinfo is removed and secret-like query values are redacted; the parsed
+// experiment keeps every real value.
+func TestRedactBodiesCommandsAndURLs(t *testing.T) {
+	const secret = "s3cr3t-synthetic-7a1c"
+	doc := strings.Replace(base, `body: ""`, `body: '{"password":"`+secret+`"}'`, 1)
+	doc = strings.Replace(doc, "base_url: http://127.0.0.1:9000", "base_url: http://svc-user:"+secret+"@127.0.0.1:9000", 1)
+	doc = strings.Replace(doc, "url: http://127.0.0.1:9000/health", "url: http://127.0.0.1:9000/health?verbose=1&api_key="+secret+"&Session-Token="+secret+"&page=2", 1)
+	cfg := testConfig()
+
+	e, errs := Parse([]byte(doc), cfg)
+	if len(errs) > 0 {
+		t.Fatalf("the document should be valid: %v", errs)
+	}
+	if !strings.Contains(e.Traffic.Requests[0].Body, secret) || !strings.Contains(e.Traffic.BaseURL, secret) || !strings.Contains(e.Probes[0].URL, secret) {
+		t.Fatal("the parsed experiment must keep the real values: the run sends them")
+	}
+
+	out := string(Redact([]byte(doc), cfg))
+	if strings.Contains(out, secret) {
+		t.Fatalf("a secret survived redaction:\n%s", out)
+	}
+	body := `{"password":"` + secret + `"}`
+	if !strings.Contains(out, Fingerprint(body)) || !strings.Contains(out, fmt.Sprintf("len:%d]", len(body))) {
+		t.Fatalf("the body should be stored as its fingerprint:\n%s", out)
+	}
+	if !strings.Contains(out, `base_url: "http://127.0.0.1:9000"`) || strings.Contains(out, "svc-user") {
+		t.Fatalf("userinfo should be removed from base_url:\n%s", out)
+	}
+	if !strings.Contains(out, "/health?verbose=1&api_key=REDACTED&Session-Token=REDACTED&page=2") {
+		t.Fatalf("only the sensitive query values should change, in place:\n%s", out)
+	}
+	if _, errs := Parse([]byte(out), cfg); len(errs) > 0 {
+		t.Fatalf("the redacted document no longer validates: %v", errs)
+	}
+	if again := string(Redact([]byte(out), cfg)); again != out {
+		t.Fatalf("redaction must be idempotent:\n%s\n---\n%s", out, again)
+	}
+
+	cmdDoc := `version: 1
+name: cmd
+target: {route: inventory}
+duration: 5s
+traffic:
+  command: "curl -H 'Authorization: Bearer ` + secret + `' http://127.0.0.1:9000"
+faults:
+  - {id: f1, type: reset}
+`
+	out = string(Redact([]byte(cmdDoc), cfg))
+	if strings.Contains(out, secret) || !strings.Contains(out, "sha256:") {
+		t.Fatalf("traffic.command should be stored as its fingerprint:\n%s", out)
+	}
+}
+
+func TestRedactURL(t *testing.T) {
+	params := config.Default().RedactionQueryParams
+	cases := map[string]string{
+		"http://h/p":                        "http://h/p",
+		"http://h/p?q=1&page=2":             "http://h/p?q=1&page=2",
+		"https://u:pw@h:8443/p":             "https://h:8443/p",
+		"http://h/p?access_token=x&TOKEN=y": "http://h/p?access_token=REDACTED&TOKEN=REDACTED",
+		"http://h/p?flag&sig=abc":           "http://h/p?flag&sig=REDACTED",
+		"http://h/p?a%5Fkey=x":              "http://h/p?a%5Fkey=REDACTED",
+		"http://h/p?password=x#frag":        "http://h/p?password=REDACTED#frag",
+	}
+	for in, want := range cases {
+		if got, ok := RedactURL(in, params); !ok || got != want {
+			t.Errorf("RedactURL(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := RedactURL("http://[::1", params); ok {
+		t.Error("an unparseable URL must be reported, so the caller can withhold it")
+	}
+}
+
+func TestWarningsForCredentialsInURLs(t *testing.T) {
+	doc := strings.Replace(base, "base_url: http://127.0.0.1:9000", "base_url: http://svc:pw@127.0.0.1:9000", 1)
+	e, errs := Parse([]byte(doc), testConfig())
+	if len(errs) > 0 {
+		t.Fatalf("credentials in a URL are a warning, not an error: %v", errs)
+	}
+	w := Warnings(e)
+	if len(w) != 1 || w[0].Path != "traffic.base_url" {
+		t.Fatalf("expected one warning at traffic.base_url, got %v", w)
+	}
+	e, _ = Parse([]byte(base), testConfig())
+	if w := Warnings(e); len(w) != 0 {
+		t.Fatalf("no warnings expected for a clean document: %v", w)
 	}
 }

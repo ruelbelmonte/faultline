@@ -56,7 +56,7 @@ faults:                       # at least one; see faults.md
 
 ## Validation
 
-`faultline validate <file|dir>` and `POST /api/v1/experiments/validate` apply the same rules. Errors are `{path, message}` with a dotted path such as `faults[0].type`; the CLI prints them as `path: message` and exits 2.
+`faultline validate <file|dir>` and `POST /api/v1/experiments/validate` apply the same rules. Errors are `{path, message}` with a dotted path such as `faults[0].type`; the CLI prints them as `path: message` and exits 2. Warnings have the same shape and do not make an experiment invalid; the API returns them in `warnings` and the CLI prints them as `warning: path: message`.
 
 - `version` is 1; `name` matches `[a-z0-9-]+`.
 - `target.route` and every fault's `route` exist in `faultline.yaml`.
@@ -127,9 +127,20 @@ Notes:
 - `slow_recovery` and `fault_not_triggered` are not reported for aborted runs.
 - The constants (50 ms, 0.9, 0.5) are in `internal/findings/thresholds.go`.
 
-## Sensitive headers
+## Redaction
 
-Values of headers named in `redaction.headers`, under `traffic.requests[].headers` and under `faults[].params.headers`, are sent as written but stored and shown as `[REDACTED]`. This is why an experiment with such a header has to be run from its file (`faultline run`): the copy the dashboard can load no longer has the value.
+What a run sends and what is stored or shown differ in these places. The run keeps the real values in memory only.
+
+| Where | Stored and shown as |
+|---|---|
+| Values of headers named in `redaction.headers`, under `traffic.requests[].headers` and `faults[].params.headers` | `[REDACTED]` |
+| `traffic.requests[].body` and `traffic.command` | A fingerprint: `[REDACTED sha256:<hex> len:<bytes>]`. Equal values give equal fingerprints, so two runs can be compared without storing either value |
+| Userinfo (`user:password@`) in `traffic.base_url` and probe URLs | Removed. Validation warns about it (`warnings` in the validate response, `warning:` lines from `faultline validate`) |
+| Values of query parameters in those URLs whose names contain an entry of `redaction.query_params` (by default `token`, `key`, `secret`, `passw`, `pwd`, `auth`, `sig`, `session`, `credential`, case-insensitive) | `REDACTED`; the rest of the URL is kept as written |
+
+This applies to the copy of the experiment kept with each run, to what `GET /api/v1/experiments/{name}` returns and to what `PUT` writes. So an experiment with a request body, a command, a sensitive header or credentials in a URL has to be run from its file (`faultline run`): the copy the dashboard can load holds fingerprints and placeholders, not the values. Saving it from the dashboard also writes that copy over the file (issue #15).
+
+A fingerprint is a plain SHA-256. A short or guessable value (a weak password on its own as the whole body, for example) can be recovered from it by trying candidates, so keep real secrets out of experiments altogether.
 
 The request `body` is stored as part of the experiment. Keep it synthetic.
 

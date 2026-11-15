@@ -78,7 +78,7 @@ Under `data_dir`, on the control plane's volume:
 - `audit.jsonl`: the audit log, append-only from the application's side. It is a plain file; protect it with file permissions and ship it to your log store if you need it to be tamper-evident.
 - `reports/{run_id}/`: the four report files.
 
-Not kept: request or response bodies, header values, query strings. Values of headers listed in `redaction.headers` are replaced by `[REDACTED]` in anything stored or shown. The data directory is created with owner-only permissions. Give it a persistent volume if run history matters, and delete it to forget everything.
+Not kept: request or response bodies, header values, query strings of proxied requests. In the stored copy of an experiment, values of headers listed in `redaction.headers` are `[REDACTED]`, request bodies and `traffic.command` are fingerprints (SHA-256 and length), URL credentials are removed and secret-looking query values are `REDACTED`. The data directory is created with owner-only permissions. Give it a persistent volume if run history matters, and delete it to forget everything.
 
 Logs are structured (`--log-format json`). They contain run ids, route names, methods and statuses. A failed upstream call is logged as the route, the method and a class of error (`connection_refused`, `connection_reset`, `timeout`, `dns`, `tls`, `eof`, `transport` or `other`), never the error text, because Go's transport errors include the full upstream URL and its query string.
 

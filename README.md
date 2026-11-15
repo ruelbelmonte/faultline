@@ -170,7 +170,7 @@ Across several files the worst result wins: 12, then 10, then 11, then 0. `--rep
 ## Security and data handling
 
 - Bodies are never stored. The proxy looks inside a request body in one case only: to tell whether a request is an MCP tool call, when an MCP fault of the active run otherwise matches it (at most 1 MiB, in memory, forwarded unchanged). The proxy records method, path (without query string), status, timing, the correlation id and whether a fault applied. It does not record header values.
-- Values of headers listed in `redaction.headers` are replaced with `[REDACTED]` wherever they could be stored or shown, including inside a saved experiment. The driver keeps the real value in memory only.
+- Values of headers listed in `redaction.headers` are replaced with `[REDACTED]` wherever they could be stored or shown, including inside a saved experiment. Request bodies and `traffic.command` are stored as a SHA-256 fingerprint and length, URL credentials are removed, and secret-looking query parameter values are replaced. The run keeps the real values in memory only. See [docs/experiments.md](docs/experiments.md#redaction).
 - Tokens are compared in constant time and are never logged. Processes Faultline starts get only the tokens they need: the traffic command gets none, and under `faultline up` the proxy gets the admin token only.
 - All listeners bind to `127.0.0.1` by default. To expose them in QA, see [docs/qa-deployment.md](docs/qa-deployment.md): restrict the network, terminate TLS in front of the control plane, and keep the proxy admin port private.
 - The audit log (`{data_dir}/audit.jsonl` and SQLite) is append-only from the application's side. It is not tamper-proof against someone with access to the files.
@@ -198,7 +198,7 @@ The dashboard's built assets are committed under `internal/ui/dist`, so building
 - LLM faults understand the Anthropic Messages API and OpenAI chat completions (`/chat/completions`). Other OpenAI endpoints, such as the Responses API, are not covered.
 - One run at a time per control plane. No user accounts, RBAC or SSO: one token for the control API, one for the proxy admin API.
 - Proxy and control compare absolute times, so their clocks need to be in sync (NTP is enough).
-- An experiment that needs a sensitive header value cannot be run from the dashboard editor; run it from its file.
+- An experiment with a request body, a command, a sensitive header value or credentials in a URL cannot be run from the dashboard editor, which only ever sees the redacted copy; run it from its file.
 
 ## License
 
