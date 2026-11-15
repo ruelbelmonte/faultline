@@ -159,3 +159,36 @@ test('the page can be used with the keyboard alone', async ({ page, browserName 
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toBeHidden()
 })
+
+// Issue #28: a second run of the same experiment is compared with the first,
+// and the editor shows the experiment's history.
+test('run comparison and per-experiment history', async ({ page, request, browserName }) => {
+  await waitForNoActiveRun(request)
+  // One control plane serves every browser project, so each needs its own
+  // experiment: another browser's runs would otherwise be this one's baseline.
+  const name = `ui-history-${browserName}`
+  const yaml = experiment(name, '2s')
+  const first = await createRun(request, yaml)
+  await waitForNoActiveRun(request)
+  const second = await createRun(request, yaml)
+  await waitForNoActiveRun(request)
+
+  await signedIn(page, `#/runs/${first}`)
+  await expect(page.getByTestId('comparison')).toContainText('No earlier run of this experiment')
+
+  await page.goto(`/#/runs/${second}`)
+  const comparison = page.getByTestId('comparison')
+  await expect(comparison).toContainText(first, { timeout: 15_000 })
+  await expect(comparison).toContainText('previous')
+  await expect(comparison.getByRole('cell', { name: 'error_rate_max' })).toBeVisible()
+
+  await page.goto('/#/experiments')
+  await page.getByTestId('experiment-yaml').fill(yaml)
+  await expect(page.getByTestId('experiment-status')).toContainText('Valid')
+  await page.getByTestId('experiment-name').fill(name)
+  await page.getByTestId('experiment-save').click()
+  await page.getByRole('button', { name: `${name}.yaml` }).click()
+  const history = page.getByTestId('experiment-history')
+  await expect(history.getByRole('row').filter({ hasText: second })).toContainText('failed')
+  await expect(history.getByRole('row').filter({ hasText: first })).toContainText('no comparison')
+})

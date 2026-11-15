@@ -292,15 +292,19 @@ func (c *Control) handleValidate(w http.ResponseWriter, r *http.Request) {
 func (c *Control) handleRunCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ExperimentYAML string `json:"experiment_yaml"`
+		Baseline       string `json:"baseline"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	id, err := c.CreateRun([]byte(body.ExperimentYAML), actorFrom(r))
+	id, err := c.CreateRun([]byte(body.ExperimentYAML), actorFrom(r), body.Baseline)
 	var verrs yamlx.Errors
+	var berr *BaselineError
 	switch {
 	case errors.As(err, &verrs):
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_experiment", "errors": verrs})
+	case errors.As(err, &berr):
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_baseline", "message": berr.Message})
 	case errors.Is(err, ErrRunActive):
 		resp := map[string]string{"error": "run_active"}
 		if a := c.activeRun(); a != nil {
@@ -315,7 +319,7 @@ func (c *Control) handleRunCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Control) handleRuns(w http.ResponseWriter, r *http.Request) {
-	runs, err := c.store.Runs()
+	runs, err := c.store.Runs(r.URL.Query().Get("experiment"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return

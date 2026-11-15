@@ -181,10 +181,22 @@ type RunSummary struct {
 	Status     string  `json:"status"`
 	Verdict    *string `json:"verdict"`
 	StartedAt  string  `json:"started_at"`
+	// Key figures for the per-experiment history (issue #28), read from the
+	// run document; additive to the PRD's list shape.
+	ErrorRate  *float64 `json:"error_rate"`
+	P95Ms      *float64 `json:"p95_ms"`
+	Regression *bool    `json:"regression"`
 }
 
-func (s *Store) Runs() ([]RunSummary, error) {
-	rows, err := s.db.Query(`SELECT run_id, experiment, status, verdict, started_at FROM runs ORDER BY rowid DESC`)
+// Runs lists runs newest first, all of them or those of one experiment.
+func (s *Store) Runs(experiment string) ([]RunSummary, error) {
+	const cols = `run_id, experiment, status, verdict, started_at,
+		json_extract(doc, '$.metrics.driver.error_rate'), json_extract(doc, '$.metrics.driver.p95_ms'), json_extract(doc, '$.comparison.regression')`
+	query, args := `SELECT `+cols+` FROM runs ORDER BY rowid DESC`, []any{}
+	if experiment != "" {
+		query, args = `SELECT `+cols+` FROM runs WHERE experiment = ? ORDER BY rowid DESC`, []any{experiment}
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -192,12 +204,51 @@ func (s *Store) Runs() ([]RunSummary, error) {
 	out := []RunSummary{}
 	for rows.Next() {
 		var r RunSummary
-		if err := rows.Scan(&r.RunID, &r.Experiment, &r.Status, &r.Verdict, &r.StartedAt); err != nil {
+		var regression *int64
+		if err := rows.Scan(&r.RunID, &r.Experiment, &r.Status, &r.Verdict, &r.StartedAt, &r.ErrorRate, &r.P95Ms, &regression); err != nil {
 			return nil, err
+		}
+		if regression != nil {
+			v := *regression != 0
+			r.Regression = &v
+		}
+		if !report.Terminal(r.Status) {
+			r.ErrorRate, r.P95Ms = nil, nil // not final yet
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// LatestFinished returns the newest finished run, other than excludeID, of the
+// experiment with this name and yaml_sha256, optionally only a passed one.
+// It returns nil when there is none.
+func (s *Store) LatestFinished(name, yamlSHA256, excludeID string, passedOnly bool) (*report.Document, error) {
+	query := `SELECT doc FROM runs WHERE experiment = ? AND run_id <> ? AND status IN (?, ?)`
+	args := []any{name, excludeID, report.StatusCompleted, report.StatusAborted}
+	if passedOnly {
+		query += ` AND verdict = ?`
+		args = append(args, report.VerdictPassed)
+	}
+	rows, err := s.db.Query(query+` ORDER BY rowid DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var docJSON string
+		if err := rows.Scan(&docJSON); err != nil {
+			return nil, err
+		}
+		var doc report.Document
+		if err := json.Unmarshal([]byte(docJSON), &doc); err != nil {
+			return nil, err
+		}
+		if doc.Experiment.YAMLSHA256 == yamlSHA256 {
+			return &doc, nil
+		}
+	}
+	return nil, rows.Err()
 }
 
 // Unfinished lists runs left in a non-terminal status by a previous process.

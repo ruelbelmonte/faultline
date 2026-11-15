@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -16,6 +17,41 @@ import (
 )
 
 var ErrRunActive = errors.New("a run is already active")
+
+// BaselineError rejects a run whose comparison baseline cannot be used.
+type BaselineError struct{ Message string }
+
+func (e *BaselineError) Error() string { return e.Message }
+
+var runIDRE = regexp.MustCompile(`^run_[a-z2-7]{12}$`)
+
+// checkBaseline normalises the baseline a run asked for. An explicit run id
+// must name a finished run of the same experiment.
+func (c *Control) checkBaseline(baseline, experimentName string) (string, error) {
+	switch baseline {
+	case "", report.BaselinePrevious:
+		return report.BaselinePrevious, nil
+	case report.BaselineLastPassed:
+		return baseline, nil
+	}
+	if !runIDRE.MatchString(baseline) {
+		return "", &BaselineError{"baseline must be previous, last-passed or a run id"}
+	}
+	doc, _, err := c.store.Run(baseline)
+	if errors.Is(err, ErrNotFound) {
+		return "", &BaselineError{"baseline run " + baseline + " does not exist"}
+	}
+	if err != nil {
+		return "", err
+	}
+	if !report.Terminal(doc.Status) {
+		return "", &BaselineError{"baseline run " + baseline + " has not finished"}
+	}
+	if doc.Experiment.Name != experimentName {
+		return "", &BaselineError{"baseline run " + baseline + " is of experiment " + doc.Experiment.Name + ", not " + experimentName}
+	}
+	return baseline, nil
+}
 
 // Control owns the store, the proxy client and at most one active run.
 type Control struct {
@@ -47,11 +83,16 @@ func (c *Control) audit(actor Actor, action, runID string, detail map[string]any
 }
 
 // CreateRun validates an experiment and starts it. Validation problems come
-// back as yamlx.Errors.
-func (c *Control) CreateRun(rawYAML []byte, actor Actor) (string, error) {
+// back as yamlx.Errors. baseline selects what the report is compared with when
+// the run finishes; "" means report.BaselinePrevious.
+func (c *Control) CreateRun(rawYAML []byte, actor Actor, baseline string) (string, error) {
 	exp, errs := experiment.Parse(rawYAML, c.cfg)
 	if len(errs) > 0 {
 		return "", errs
+	}
+	baseline, err := c.checkBaseline(baseline, exp.Name)
+	if err != nil {
+		return "", err
 	}
 	c.mu.Lock()
 	for c.active != nil {
@@ -70,6 +111,7 @@ func (c *Control) CreateRun(rawYAML []byte, actor Actor) (string, error) {
 		c.mu.Lock()
 	}
 	r := newRun(c, exp, rawYAML)
+	r.baseline = baseline
 	c.active = r
 	c.mu.Unlock()
 

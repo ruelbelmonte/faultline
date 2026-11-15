@@ -124,6 +124,10 @@ type Document struct {
 	Metrics         Metrics           `json:"metrics"`
 	RecoverySeconds *float64          `json:"recovery_seconds"`
 	Redaction       Redaction         `json:"redaction"`
+	// Comparison with an earlier run of the same experiment, set when the run
+	// finishes and a baseline exists; null otherwise. Added without a schema
+	// version change: older readers ignore it.
+	Comparison *Comparison `json:"comparison"`
 }
 
 // Point is one second of the run timeline.
