@@ -12,7 +12,7 @@ import {
   type RunDocument,
   type Timeseries,
 } from '../api'
-import { duration, evidence, percent, time, verdictMark } from '../format'
+import { duration, evidence, percent, signed, time, verdictMark } from '../format'
 import Timeline from './Timeline.vue'
 
 const props = defineProps<{ id: string }>()
@@ -244,6 +244,54 @@ onBeforeUnmount(() => {
           </tbody>
         </table>
       </article>
+    </section>
+
+    <section v-if="!active" data-testid="comparison">
+      <h2>Compared with an earlier run</h2>
+      <p v-if="!doc.comparison" class="muted">No earlier run of this experiment to compare with.</p>
+      <template v-else>
+        <p>
+          Baseline <a :href="`#/runs/${doc.comparison.baseline_run_id}`"><code>{{ doc.comparison.baseline_run_id }}</code></a>
+          ({{ doc.comparison.baseline_selection }}, {{ verdictMark(doc.comparison.baseline_verdict) }} {{ doc.comparison.baseline_verdict ?? 'unknown' }},
+          {{ time(doc.comparison.baseline_started_at) }}).
+          <template v-if="!doc.comparison.same_experiment_yaml"> The experiment file differs from the baseline's.</template>
+        </p>
+        <div v-if="doc.comparison.regression" class="error" role="status" data-testid="comparison-regression">
+          <strong>✕ Regression</strong>
+          <ul>
+            <li v-for="(r, i) in doc.comparison.regression_reasons" :key="i">{{ r }}</li>
+          </ul>
+        </div>
+        <p v-else class="pass" role="status">✓ No regression</p>
+        <div v-if="doc.comparison.hypothesis.length" class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Threshold</th>
+                <th scope="col" class="n">Baseline</th>
+                <th scope="col" class="n">Now</th>
+                <th scope="col" class="n">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in doc.comparison.hypothesis" :key="h.name">
+                <td><code>{{ h.name }}</code></td>
+                <td class="n">{{ h.baseline_observed ?? 'no data' }}</td>
+                <td class="n">{{ h.observed ?? 'no data' }}</td>
+                <td class="n">{{ h.delta === null ? 'n/a' : signed(h.delta) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="doc.comparison.findings_appeared.length">
+          Findings that appeared:
+          <code v-for="f in doc.comparison.findings_appeared" :key="f.id + (f.route ?? '')">{{ f.id }}{{ f.route ? ` (${f.route})` : '' }} </code>
+        </p>
+        <p v-if="doc.comparison.findings_resolved.length">
+          Findings no longer present:
+          <code v-for="f in doc.comparison.findings_resolved" :key="f.id + (f.route ?? '')">{{ f.id }}{{ f.route ? ` (${f.route})` : '' }} </code>
+        </p>
+      </template>
     </section>
 
     <section>

@@ -14,6 +14,12 @@ export function percent(v: number): string {
   return `${(v * 100).toFixed(1).replace(/\.0$/, '')}%`
 }
 
+/** A change with its sign, rounded to 4 decimals: +0.11, -3, 0. */
+export function signed(v: number): string {
+  const s = String(Number(v.toFixed(4)))
+  return v > 0 ? `+${s}` : s
+}
+
 export function evidence(v: unknown): string {
   if (v === null || v === undefined) return 'none'
   return typeof v === 'object' ? JSON.stringify(v) : String(v)

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { api, ApiError, post, put, type ExperimentEntry, type ValidationError } from '../api'
+import { api, ApiError, post, put, type ExperimentEntry, type RunSummary, type ValidationError } from '../api'
+import { percent, time, verdictMark } from '../format'
 
 const NAME = /^[a-z0-9-]+$/
 const VALIDATE_DELAY_MS = 400
@@ -12,6 +13,7 @@ const errors = ref<ValidationError[]>([])
 const validated = ref<'idle' | 'checking' | 'valid' | 'invalid'>('idle')
 const message = ref('')
 const failed = ref(false)
+const history = ref<RunSummary[]>([])
 let timer: number | undefined
 let sequence = 0
 
@@ -34,12 +36,22 @@ async function open(entry: ExperimentEntry) {
     name.value = e.name
     yaml.value = e.yaml
     say('')
+    loadHistory(e.name)
   } catch {
     say(`${entry.file} could not be opened.`, true)
   }
 }
 
+async function loadHistory(experiment: string) {
+  try {
+    history.value = await api<RunSummary[]>(`/api/v1/runs?experiment=${encodeURIComponent(experiment)}`)
+  } catch {
+    history.value = []
+  }
+}
+
 function blank() {
+  history.value = []
   name.value = ''
   yaml.value = ''
   errors.value = []
@@ -158,9 +170,39 @@ onBeforeUnmount(() => window.clearTimeout(timer))
       </div>
       <p v-if="message" :class="failed ? 'error' : 'notice'" role="status">{{ message }}</p>
       <p class="muted">
-        Values of sensitive headers (authorization, cookies, API keys) are never shown or saved here; they appear as
-        <code>[REDACTED]</code>. An experiment that needs one has to be run from its file with <code>faultline run</code>.
+        What is never shown or saved here: values of sensitive headers (they appear as <code>[REDACTED]</code>), request
+        bodies and <code>traffic.command</code> (they appear as a <code>sha256</code> fingerprint) and credentials in URLs.
+        An experiment that needs any of them has to be run from its file with <code>faultline run</code>.
       </p>
     </section>
   </div>
+
+  <section v-if="name" aria-labelledby="history-title" data-testid="experiment-history">
+    <h2 id="history-title">History of {{ name }}</h2>
+    <p v-if="history.length === 0" class="muted">No runs of this experiment yet.</p>
+    <div v-else class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Run</th>
+            <th scope="col">Started</th>
+            <th scope="col">Verdict</th>
+            <th scope="col" class="n">Error rate</th>
+            <th scope="col" class="n">p95</th>
+            <th scope="col">Against baseline</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in history" :key="r.run_id">
+            <td><a :href="`#/runs/${r.run_id}`"><code>{{ r.run_id }}</code></a></td>
+            <td>{{ time(r.started_at) }}</td>
+            <td>{{ verdictMark(r.verdict) }} {{ r.verdict ?? r.status }}</td>
+            <td class="n">{{ r.error_rate == null ? '' : percent(r.error_rate) }}</td>
+            <td class="n">{{ r.p95_ms == null ? '' : `${r.p95_ms} ms` }}</td>
+            <td :class="r.regression ? 'fail' : undefined">{{ r.regression == null ? 'no comparison' : r.regression ? '✕ regression' : '✓ no regression' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 </template>
