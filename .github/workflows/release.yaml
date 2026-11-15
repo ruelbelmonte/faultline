@@ -1,0 +1,203 @@
+name: release
+
+# A v* tag builds and publishes a release: six binaries with checksums, an
+# SBOM, build provenance, and signed multi-platform images on GHCR.
+# workflow_dispatch, and any pull request that changes the release machinery,
+# is a dry run: it builds everything the same way but logs in nowhere, pushes
+# nothing, signs nothing and creates no release. Its binaries, checksums and
+# SBOM are kept as a workflow artifact to inspect. Only a tag push publishes.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yaml
+      - Dockerfile
+      - Dockerfile.demo
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp into the dry-run build (no leading v)
+        required: true
+        default: 0.0.0-dryrun
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Version and mode
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            publish=true
+            # Only a tag on master's history is released.
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/master || { echo "::error::tag $GITHUB_REF_NAME is not on master"; exit 1; }
+          else
+            version="${INPUT_VERSION:-0.0.0-dryrun}"
+            publish=false
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::version '$version' is not MAJOR.MINOR.PATCH[-PRERELEASE]"; exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "version $version, publish $publish, prerelease $prerelease" >> "$GITHUB_STEP_SUMMARY"
+
+  binaries:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Build for six platforms (faultline and faultline-demo)
+        run: |
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}; arch=${target#*/}; ext=""; [ "$os" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X faultline/internal/cli.Version=${VERSION}" \
+              -o "dist/faultline_${VERSION}_${os}_${arch}${ext}" ./cmd/faultline
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w" \
+              -o "dist/faultline-demo_${VERSION}_${os}_${arch}${ext}" ./cmd/faultline-demo
+          done
+      - name: The linux/amd64 binary reports the version
+        run: |
+          got="$(./dist/faultline_${VERSION}_linux_amd64 version)"
+          [ "$got" = "faultline ${VERSION}" ] || { echo "::error::binary reports '$got', expected 'faultline ${VERSION}'"; exit 1; }
+      - name: SBOM of the source
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/faultline_${{ env.VERSION }}.spdx.json
+          upload-artifact: false
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt && cat checksums.txt
+      - name: Build provenance for the binaries
+        if: needs.plan.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/faultline_*
+            dist/faultline-demo_*
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  images:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: faultline
+            file: Dockerfile
+          - name: faultline-demo
+            file: Dockerfile.demo
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Image name
+        id: img
+        run: |
+          owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/${{ matrix.name }}"
+          tags="${image}:${VERSION}"
+          if [ "${{ needs.plan.outputs.prerelease }}" = "false" ]; then tags="${tags},${image}:latest"; fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (and, for a tag, push) for linux/amd64 and linux/arm64
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.img.outputs.tags }}
+          push: ${{ env.PUBLISH == 'true' }}
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: env.PUBLISH == 'true'
+      - name: Sign the image (keyless)
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${{ steps.img.outputs.image }}@${DIGEST}"
+      - name: Build provenance for the image
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.img.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    needs: [plan, binaries, images]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          flags=""
+          [ "$PRERELEASE" = "true" ] && flags="--prerelease"
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes $flags
