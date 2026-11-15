@@ -620,6 +620,8 @@ Every new test was written before the fix and seen failing against the old code:
 - CI on pull request #37: CI_RESULT_PLACEHOLDER
 - `npm audit --audit-level=high`: 0 vulnerabilities, locally and in CI. govulncheck and both Trivy scans: no findings at or above their thresholds in the first CI run, so `.trivyignore.yaml` starts empty.
 
+One test defect found by CI, fixed: in the first CI run, `TestTrafficCommandEnvHasNoTokens` failed on macOS only (run 43656566339, job `integration (macos-latest)`) with an empty output file. The test's command was `env > file`. Control re-runs it in a loop and kills its process group when the run ends, and on macOS the kill landed after the shell had truncated the file but before `env` wrote it. The command now appends (`env >> file`), as `TestTrafficCommand` already did, so every earlier complete write survives and the check still scans all of them for tokens. Not a product defect: the product behaved as designed.
+
 One local environment problem, not a product defect: `go run honnef.co/go/tools/cmd/staticcheck@v0.8.2` under `GOTOOLCHAIN=auto` switched to go1.26 (staticcheck's own minimum) and then failed to analyse go1.27 sources. CI installs go1.27 directly and does not hit it. Locally, set `GOTOOLCHAIN=go1.27.4` (or newer) before `make lint`. `govulncheck` cannot run in this container at all, because the network policy refuses vuln.go.dev.
 
 ## Not done, and why

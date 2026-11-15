@@ -481,9 +481,11 @@ func TestLLMFaultsThroughControl(t *testing.T) {
 func TestTrafficCommandEnvHasNoTokens(t *testing.T) {
 	f := startFull(t, "naive", func(s *stack) { s.controlExtra = "  allow_commands: true\n" })
 	out := f.s.dir + "/command-env.txt"
-	command := `env > "` + out + `"`
+	// Append, not truncate: the command is re-run in a loop and killed when the
+	// run ends, possibly after `>` has emptied the file and before env wrote it.
+	command := `env >> "` + out + `"`
 	if runtime.GOOS == "windows" {
-		command = `set > "` + strings.ReplaceAll(out, "/", `\`) + `"`
+		command = `set >> "` + strings.ReplaceAll(out, "/", `\`) + `"`
 	}
 	yaml := `version: 1
 name: command-env
