@@ -665,3 +665,74 @@ One local environment problem, not a product defect: `go run honnef.co/go/tools/
 - **Breaking change for command users (#9).** Existing experiments with `traffic.command` stop validating until `control.allow_commands: true` is set. Release notes for the next version need to say so.
 - **allowed_hosts covers experiments, not routes (#11).** Route upstreams come from `faultline.yaml` and are not checked against it; the metadata block does not apply to the proxy's own upstream connections. A config author can still point a route at a metadata address. That is a config-file trust question rather than a token-holder one, so it was left out; worth a follow-up issue if config files are not fully trusted.
 - **Error classes lose detail (#12).** Operators debugging a failing upstream now get `connection_refused` or `tls` instead of the full message, and have to reproduce against the upstream directly.
+
+# Goal 2: product loop and release pipeline
+
+Started 2026-11-15, after Goal 1 was merged to `master` (cdda636): issues #28, #29 and #24. One commit per issue on `claude/practical-maxwell-z68amm`, in pull request #44.
+
+## Status
+
+| Issue | Commit | Status | Decisions |
+|---|---|---|---|
+| #28 run-over-run comparison | 7cbfebb | Done | D107, D108 |
+| #29 W3C baggage scoping | 675e795 | Done | D109 |
+| #24 release pipeline | 8eccaee | Done, except publishing v0.1.0, which needs the owner (steps below) | D110 |
+
+## Acceptance criteria, as written in each issue
+
+**#28**
+- [x] Running the same experiment twice gives a report that names the earlier run, with correct differences: `TestRunOverRunComparison` (integration), `TestCompare`, Playwright `run comparison and per-experiment history`.
+- [x] A new finding appearing makes `--fail-on-regression` exit non-zero, with a new documented exit code (13, D108): `TestRunOverRunComparison` (exit 13 on a regression, 0 without the flag, 10 outranking 13), `TestCompare` (an appeared finding is a regression).
+- [x] Report schema change is additive (D107; `schema_version` stays `"1"`, `comparison` is the 16th key): `TestJSONMatchesCanonicalSchema`, `TestReports`.
+- [x] Also from the goal: grouping by experiment name and `yaml_sha256` (`TestStoreBaselinesAndHistory`), `--baseline previous|last-passed|<run id>`, per-experiment history in the UI, comparison carries nothing redaction removed (`TestCompareCarriesNoEvidence`).
+
+**#29**
+- [x] A three-hop demo forwarding only `baggage` still triggers faults and the run fails as expected: `TestBaggageScopingAcrossThreeHops` (seen failing with the proxy's baggage lookup disabled), with `TestBaggageTurnedOffDoesNotScope` as the control.
+- [x] Malformed baggage is ignored safely and the parser is bounded: `TestGet`, `TestGetBounded`, `TestScopeFromHeaderOrBaggage`.
+- [x] `docs/faults.md` and the README "Scoping across hops" section updated.
+
+**#24**
+- [ ] Pushing `v0.1.0` produces signed binaries, images, an SBOM and provenance, and `cosign verify` succeeds. Not done: pushing a tag publishes, which the goal reserves for the owner. The workflow's dry run (pull request trigger) builds everything the release would; the steps to publish are below.
+- [x] The README quickstart works without a Go toolchain: a release-download path sits beside build-from-source, to be tried once the first release exists.
+- [x] Also from the goal: base images pinned by digest, version from the tag, six platforms, checksums, GHCR images, SBOM, keyless cosign, provenance, dry run that skips publishing.
+
+## Gates
+
+- Local, per commit, in a clean worktree: `make lint`, `make test`, `go test -race` on the packages touched, `make test-integration`. Green for #28 (the Go content of 7cbfebb) and #29 (675e795): GATE_29_PLACEHOLDER. #24 changes workflows, Dockerfiles and docs only; its gate is CI (the `docker` job builds both Dockerfiles with the digest pins and cross-compiling stages, and the `release` dry run builds everything a release would).
+- Playwright, locally in Chromium: the new comparison test and the full axe audit pass. In CI the first run failed in Firefox and WebKit only: the three browser projects share one control plane, so the "first" run in the second and third browsers had the first browser's runs as a baseline. The test now uses an experiment per browser. A test defect, not a product one.
+- CI on pull request #44: CI_44_PLACEHOLDER
+- `actionlint` (v1.7.7) reports nothing for `ci.yaml` and `release.yaml`.
+
+## Not done, and why
+
+- **Publishing v0.1.0.** Reserved for the owner by the goal. Steps below and in `docs/releasing.md`.
+- **Manual `workflow_dispatch` dry run.** Not possible before the workflow is on `master`; the pull request trigger runs the same dry run instead.
+
+## Steps to cut v0.1.0
+
+1. Merge #44. Check that `master` is green in CI.
+2. Optional: Actions, release, Run workflow on `master` with version `0.1.0-rc.1-dryrun`, and download the `dist` artifact to try a binary.
+3. Tag and push from an up-to-date `master`:
+   ```sh
+   git checkout master && git pull
+   git tag -a v0.1.0 -m "Faultline 0.1.0"
+   git push origin v0.1.0
+   ```
+4. Watch the release workflow (plan, binaries, images, release).
+5. On GHCR, the `faultline` and `faultline-demo` packages start private: make them public if anyone should pull them without logging in, and link them to the repository.
+6. Edit the generated release notes to call out the breaking change: experiments with `traffic.command` need `control.allow_commands: true` (D101). Mention the new `comparison` key and exit code 13 (D107, D108) and baggage scoping (D109).
+7. Verify:
+   ```sh
+   cosign verify ghcr.io/ruelbelmonte/faultline:0.1.0 \
+     --certificate-identity-regexp '^https://github.com/ruelbelmonte/faultline/\.github/workflows/release\.yaml@refs/tags/v' \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   gh attestation verify oci://ghcr.io/ruelbelmonte/faultline:0.1.0 --repo ruelbelmonte/faultline
+   ```
+   and follow the README quickstart's release path on a machine without Go.
+
+## New risks and consequences found
+
+- **Report schema now has 16 keys (D107).** Any consumer, including the external acceptance suite, that checks for exactly 15 needs updating.
+- **The demo forwards `baggage` by default now (D109).** Harmless for the demo, but anyone copying its client code should know.
+- **Release depends on GHCR package visibility and naming.** First publish creates private packages under the owner's account; step 5 above.
+- **Dependabot's major-version PRs (#38 to #42) touch the same files** (`actions/*` pins, the node base image). Merge #44 first, then rebase or let Dependabot recreate them, so the digest pins and the new workflow are updated together.
