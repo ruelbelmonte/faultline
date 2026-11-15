@@ -23,8 +23,10 @@ control:
 
 scope:
   header: X-Chaos-Run
+  baggage_key: chaos-run
 correlation:
   header: X-Chaos-Correlation
+  baggage_key: chaos-corr
 
 redaction:
   headers: [authorization, proxy-authorization, x-api-key, cookie, set-cookie]

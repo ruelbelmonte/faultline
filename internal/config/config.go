@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"faultline/internal/baggage"
 	"faultline/internal/yamlx"
 )
 
@@ -53,6 +54,11 @@ type Config struct {
 
 	ScopeHeader       string
 	CorrelationHeader string
+	// ScopeBaggageKey and CorrelationBaggageKey name W3C baggage entries that
+	// carry the run id and correlation id when the headers are absent.
+	// Empty turns baggage off for that value.
+	ScopeBaggageKey       string
+	CorrelationBaggageKey string
 
 	RedactionHeaders []string
 	// RedactionQueryParams are substrings of query parameter names whose
@@ -80,6 +86,8 @@ func Default() *Config {
 		MaxExperimentDuration:       15 * time.Minute,
 		ScopeHeader:                 "X-Chaos-Run",
 		CorrelationHeader:           "X-Chaos-Correlation",
+		ScopeBaggageKey:             "chaos-run",
+		CorrelationBaggageKey:       "chaos-corr",
 		RedactionHeaders:            []string{"authorization", "proxy-authorization", "x-api-key", "cookie", "set-cookie"},
 		RedactionQueryParams:        []string{"token", "key", "secret", "passw", "pwd", "auth", "sig", "session", "credential"},
 		RetryAmplificationThreshold: 3.0,
@@ -206,11 +214,17 @@ func Parse(data []byte) (*Config, error) {
 		if v, ok := m.Str("header"); ok {
 			c.ScopeHeader = headerName(&errs, m.Path("header"), v)
 		}
+		if v, ok := m.Str("baggage_key"); ok {
+			c.ScopeBaggageKey = baggageKey(&errs, m.Path("baggage_key"), v)
+		}
 		m.Done()
 	}
 	if m := root.Map("correlation"); m != nil {
 		if v, ok := m.Str("header"); ok {
 			c.CorrelationHeader = headerName(&errs, m.Path("header"), v)
+		}
+		if v, ok := m.Str("baggage_key"); ok {
+			c.CorrelationBaggageKey = baggageKey(&errs, m.Path("baggage_key"), v)
 		}
 		m.Done()
 	}
@@ -337,6 +351,13 @@ func EnvWithoutTokens(environ []string) []string {
 		}
 	}
 	return out
+}
+
+func baggageKey(errs *yamlx.Errors, path, v string) string {
+	if v != "" && !baggage.ValidKey(v) {
+		errs.Add(path, "must be a valid baggage key (an HTTP token), or empty to turn baggage off")
+	}
+	return v
 }
 
 // Token reads a required bearer token from the environment.

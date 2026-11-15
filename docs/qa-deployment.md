@@ -56,7 +56,7 @@ Faultline does not terminate TLS itself. Calls from the proxy to an `https://` u
 - Leave `control.allow_commands: false`. With it on, anyone holding the control token can run shell commands on the control host through `traffic.command`.
 - Leave `control.allow_unscoped: false`. Experiments with `scope: all` are then rejected, and every fault applies only to requests that carry the run id in `X-Chaos-Run`.
 - Requests from other users, other test suites and other run ids pass through untouched.
-- Services between the entry point and the proxy have to forward `X-Chaos-Run` and `X-Chaos-Correlation` on their outgoing calls. A service that drops them does not get faults behind it; the run then ends `inconclusive` with `fault_not_triggered`.
+- Services between the entry point and the proxy have to pass on the run id: either W3C baggage (`chaos-run`, `chaos-corr`), which OpenTelemetry-instrumented services already forward, or the `X-Chaos-Run` and `X-Chaos-Correlation` headers. A service that drops them does not get faults behind it; the run then ends `inconclusive` with `fault_not_triggered`.
 - Only one run can be active at a time. A second `faultline run` gets a 409 until the first finishes.
 
 ## What happens when things go wrong
@@ -91,5 +91,5 @@ Logs are structured (`--log-format json`). They contain run ids, route names, me
 - [ ] 7702 is reachable from the control plane only; 7701 from the services under test only.
 - [ ] 7700 is behind TLS and network restrictions.
 - [ ] Both tokens come from the secret store, are different, and are at least 32 random bytes.
-- [ ] Services forward `X-Chaos-Run` and `X-Chaos-Correlation`.
+- [ ] Services forward W3C baggage, or `X-Chaos-Run` and `X-Chaos-Correlation`.
 - [ ] Experiments have `abort` thresholds, and the team knows where the kill switch is.

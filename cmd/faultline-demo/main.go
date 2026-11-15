@@ -25,8 +25,13 @@ func main() {
 	fs.StringVar(&o.LLM, "llm", "127.0.0.1:9003", "LLM mock listen address")
 	fs.StringVar(&o.ScopeHeader, "scope-header", "X-Chaos-Run", "scope header forwarded downstream")
 	fs.StringVar(&o.CorrelationHeader, "correlation-header", "X-Chaos-Correlation", "correlation header forwarded downstream")
+	fs.StringVar(&o.Propagate, "propagate", demo.PropagateHeaders, "how the run id reaches downstream calls: headers (scope and correlation headers, and baggage) or baggage (W3C baggage only)")
 	logFormat := fs.String("log-format", "text", "log format: text or json")
 	if err := fs.Parse(os.Args[1:]); err != nil {
+		os.Exit(2)
+	}
+	if o.Propagate != demo.PropagateHeaders && o.Propagate != demo.PropagateBaggage {
+		fmt.Fprintf(os.Stderr, "faultline-demo: --propagate must be headers or baggage, got %q\n", o.Propagate)
 		os.Exit(2)
 	}
 	if !demo.ValidMode(o.Mode) {
