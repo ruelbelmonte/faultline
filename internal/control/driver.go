@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"faultline/internal/baggage"
 	"faultline/internal/config"
 	"faultline/internal/experiment"
 )
@@ -85,8 +86,7 @@ func (r *Run) sendOne(ctx context.Context, client *http.Client, base string, spe
 	for k, v := range spec.Headers {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set(r.c.cfg.ScopeHeader, r.id)
-	req.Header.Set(r.c.cfg.CorrelationHeader, newUUID())
+	r.scope(req.Header, newUUID())
 
 	s := sample{start: time.Now()}
 	resp, err := client.Do(req)
@@ -141,8 +141,7 @@ func (r *Run) probe(ctx context.Context, p experiment.Probe) {
 		ok := false
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL, nil)
 		if err == nil {
-			req.Header.Set(r.c.cfg.ScopeHeader, r.id)
-			req.Header.Set(r.c.cfg.CorrelationHeader, newUUID())
+			r.scope(req.Header, newUUID())
 			if resp, err := client.Do(req); err == nil {
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
@@ -158,5 +157,20 @@ func (r *Run) probe(ctx context.Context, p experiment.Probe) {
 			return
 		case <-tick.C:
 		}
+	}
+}
+
+// scope marks a driver or probe request as this run's: the scope and
+// correlation headers, and the same two values as W3C baggage entries for
+// services that propagate baggage rather than custom headers.
+func (r *Run) scope(h http.Header, correlation string) {
+	cfg := r.c.cfg
+	h.Set(cfg.ScopeHeader, r.id)
+	h.Set(cfg.CorrelationHeader, correlation)
+	if cfg.ScopeBaggageKey != "" {
+		baggage.Append(h, cfg.ScopeBaggageKey, r.id)
+	}
+	if cfg.CorrelationBaggageKey != "" {
+		baggage.Append(h, cfg.CorrelationBaggageKey, correlation)
 	}
 }

@@ -60,3 +60,33 @@ func TestUpstreamErrorLogHasNoURL(t *testing.T) {
 		})
 	}
 }
+
+// Issue #29: the run id and correlation id come from the headers, or else
+// from W3C baggage; the header wins; baggage can be turned off.
+func TestScopeFromHeaderOrBaggage(t *testing.T) {
+	cfg := config.Default()
+	p := &Proxy{cfg: cfg}
+	req := func(headers map[string]string) *http.Request {
+		r := httptest.NewRequest("GET", "/svc/x", nil)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		return r
+	}
+	if got := p.scopeOf(req(map[string]string{"Baggage": "tenant=t1, chaos-run=run_abcdefghijkl"})); got != "run_abcdefghijkl" {
+		t.Fatalf("scope from baggage: %q", got)
+	}
+	if got := p.correlationOf(req(map[string]string{"Baggage": "chaos-corr=c-1"})); got != "c-1" {
+		t.Fatalf("correlation from baggage: %q", got)
+	}
+	if got := p.scopeOf(req(map[string]string{"X-Chaos-Run": "run_header00000", "Baggage": "chaos-run=run_baggage0000"})); got != "run_header00000" {
+		t.Fatalf("the header must win: %q", got)
+	}
+	if got := p.scopeOf(req(map[string]string{"Baggage": "chaos-run=run_abcdefghijkl," + strings.Repeat("k=v,", 3000)})); got != "" {
+		t.Fatalf("oversized baggage must be ignored: %q", got)
+	}
+	cfg.ScopeBaggageKey = ""
+	if got := p.scopeOf(req(map[string]string{"Baggage": "chaos-run=run_abcdefghijkl"})); got != "" {
+		t.Fatalf("baggage turned off: %q", got)
+	}
+}

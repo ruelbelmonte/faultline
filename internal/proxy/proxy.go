@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode"
 
+	"faultline/internal/baggage"
 	"faultline/internal/config"
 	"faultline/internal/fault"
 )
@@ -145,7 +146,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d := p.engine.DecideCall(name, r.Method, path, r.Header.Get(p.cfg.ScopeHeader), begin, sync.OnceValue(func() *mcpCall { return readToolCall(r) }))
+	d := p.engine.DecideCall(name, r.Method, path, p.scopeOf(r), begin, sync.OnceValue(func() *mcpCall { return readToolCall(r) }))
 	var out outcome
 	aborted := false
 	func() {
@@ -180,7 +181,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Status:       out.status,
 		DurationMs:   ms(time.Since(begin)),
 		Scoped:       d.scoped,
-		Correlation:  r.Header.Get(p.cfg.CorrelationHeader),
+		Correlation:  p.correlationOf(r),
 		RetryAfter:   out.retryAfter,
 		ClientHeldMs: out.clientHeldMs,
 	}
@@ -630,4 +631,23 @@ func errorClass(err error) string {
 		return "transport"
 	}
 	return "other"
+}
+
+// scopeOf is the run id a request carries: the scope header, or else the
+// configured W3C baggage entry. The header wins when both are present.
+func (p *Proxy) scopeOf(r *http.Request) string {
+	return headerOrBaggage(r, p.cfg.ScopeHeader, p.cfg.ScopeBaggageKey)
+}
+
+// correlationOf is the correlation id, from the header or else from baggage.
+func (p *Proxy) correlationOf(r *http.Request) string {
+	return headerOrBaggage(r, p.cfg.CorrelationHeader, p.cfg.CorrelationBaggageKey)
+}
+
+func headerOrBaggage(r *http.Request, header, key string) string {
+	if v := r.Header.Get(header); v != "" || key == "" {
+		return v
+	}
+	v, _ := baggage.Get(r.Header, key)
+	return v
 }

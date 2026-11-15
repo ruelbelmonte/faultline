@@ -170,7 +170,7 @@ func startFull(t testing.TB, mode string, mods ...func(*stack)) *fullStack {
 		m(s)
 	}
 	f := &fullStack{s: s}
-	f.demo = startDemo(t, mode, "http://"+s.trafficAddr)
+	f.demo = startDemo(t, mode, "http://"+s.trafficAddr, s.demoArgs...)
 	s.routes = map[string]string{
 		"inventory": "http://" + f.demo.inventory,
 		"pricing":   "http://" + f.demo.pricing,

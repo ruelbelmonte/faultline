@@ -100,11 +100,14 @@ Run the stack with `DEMO_MODE=good` to see the same experiments against a client
 
 ### Scoping across hops
 
-A fault applies only to requests that carry the run id in the scope header. The traffic driver and the probes send it. **Faultline cannot add it for you between your services.** If service A calls service B, and B calls a dependency through the proxy, then A and B must forward the incoming `X-Chaos-Run` header (and `X-Chaos-Correlation`, which groups the attempts of one logical request) on their outgoing calls, the way you already forward `traceparent`.
+A fault applies only to requests that carry the run id. The traffic driver and the probes send it two ways at once: in the `X-Chaos-Run` header, and as the `chaos-run` entry of the W3C `baggage` header. The correlation id, which groups the attempts of one logical request, travels the same two ways (`X-Chaos-Correlation` and `chaos-corr`). **Faultline cannot carry them for you between your services.** If service A calls service B, and B calls a dependency through the proxy, then A and B must pass one of the two on.
 
-If your services already propagate OpenTelemetry baggage, the simplest way is to carry the run id as a baggage entry and copy it into the `X-Chaos-Run` header in your HTTP client middleware. The proxy itself matches on the header only; it does not read baggage.
+- **If your services propagate OpenTelemetry baggage, there is nothing to change.** OpenTelemetry's propagators forward the `baggage` header on outgoing calls, and the proxy reads `chaos-run` and `chaos-corr` from it when the custom headers are absent.
+- Otherwise, forward the incoming `X-Chaos-Run` and `X-Chaos-Correlation` headers on outgoing calls, the way you already forward `traceparent`.
 
-If a hop drops the header, faults behind that hop never trigger. The run then ends `inconclusive` with reason `fault_not_triggered`, which is the signal to look for a missing header.
+When a request carries both, the header wins. The baggage keys are configurable (`scope.baggage_key`, `correlation.baggage_key`), and an empty key turns baggage off. The proxy reads at most 8192 bytes and 180 entries of baggage, skips malformed entries, and ignores larger baggage entirely. `faultline-demo --propagate baggage` runs the demo with baggage as the only carrier.
+
+If a hop drops both, faults behind that hop never trigger. The run then ends `inconclusive` with reason `fault_not_triggered`, which is the signal to look for a missing header.
 
 ## Experiments, faults, findings
 

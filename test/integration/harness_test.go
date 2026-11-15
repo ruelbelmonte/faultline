@@ -215,12 +215,12 @@ type demoProc struct {
 	shop, inventory, pricing, llm string
 }
 
-func startDemo(t testing.TB, mode, proxyURL string) *demoProc {
+func startDemo(t testing.TB, mode, proxyURL string, extra ...string) *demoProc {
 	t.Helper()
 	d := &demoProc{shop: freeAddr(t), inventory: freeAddr(t), pricing: freeAddr(t), llm: freeAddr(t)}
-	d.proc = start(t, "faultline-demo", nil,
-		"--mode", mode, "--proxy", proxyURL,
-		"--shop", d.shop, "--inventory", d.inventory, "--pricing", d.pricing, "--llm", d.llm)
+	args := append([]string{"--mode", mode, "--proxy", proxyURL,
+		"--shop", d.shop, "--inventory", d.inventory, "--pricing", d.pricing, "--llm", d.llm}, extra...)
+	d.proc = start(t, "faultline-demo", nil, args...)
 	for _, a := range []string{d.shop, d.inventory, d.pricing, d.llm} {
 		waitHTTP(t, "http://"+a+"/health")
 	}
