@@ -30,11 +30,34 @@ Faultline is a fault-injection proxy and control plane for application-level cha
 
 ## Quickstart
 
-You need Go 1.27 or newer (the version in `go.mod`). The commands are for a POSIX shell (Linux, macOS, WSL, Git Bash on Windows). Run them from the repository root.
+The commands are for a POSIX shell (Linux, macOS, WSL, Git Bash on Windows). Get the two binaries one of two ways.
+
+**From a release** (once one is published; see [docs/releasing.md](docs/releasing.md)). Pick your platform, check the checksum, put both binaries on your `PATH`:
+
+```sh
+VERSION=0.1.0 OS=linux ARCH=amd64     # OS: linux, darwin or windows; ARCH: amd64 or arm64
+EXT=""; [ "$OS" = windows ] && EXT=.exe
+base=https://github.com/ruelbelmonte/faultline/releases/download/v$VERSION
+mkdir -p bin && cd bin
+curl -fsSLO "$base/checksums.txt"
+for f in faultline faultline-demo; do curl -fsSLO "$base/${f}_${VERSION}_${OS}_${ARCH}${EXT}"; done
+sha256sum --ignore-missing -c checksums.txt           # macOS: shasum -a 256 --ignore-missing -c checksums.txt
+gh attestation verify "faultline_${VERSION}_${OS}_${ARCH}${EXT}" --repo ruelbelmonte/faultline   # optional: build provenance
+for f in faultline faultline-demo; do mv "${f}_${VERSION}_${OS}_${ARCH}${EXT}" "$f$EXT"; done
+chmod +x faultline* && cd ..
+export PATH="$PWD/bin:$PATH"
+```
+
+**From source**, with Go 1.27 or newer (the version in `go.mod`), from the repository root:
 
 ```sh
 go build -o bin/ ./cmd/faultline ./cmd/faultline-demo     # or: make build
 export PATH="$PWD/bin:$PATH"
+```
+
+Then:
+
+```sh
 export FAULTLINE_TOKEN=$(openssl rand -hex 32)
 export FAULTLINE_ADMIN_TOKEN=$(openssl rand -hex 32)
 
