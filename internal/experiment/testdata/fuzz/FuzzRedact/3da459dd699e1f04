@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("traffic:\n  requests: {body: '00000000'}")

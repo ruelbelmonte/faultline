@@ -141,6 +141,8 @@ What a run sends and what is stored or shown differ in these places. The run kee
 
 This applies to the copy of the experiment kept with each run, to what `GET /api/v1/experiments/{name}` returns and to what `PUT` writes. So an experiment with a request body, a command, a sensitive header or credentials in a URL has to be run from its file (`faultline run`): the copy the dashboard can load holds fingerprints and placeholders, not the values. For the same reason, `PUT` refuses with `409 {"error":"contains_redacted_values"}` to save over a file that holds any such value, so the dashboard can't replace it with the redacted copy. Edit that file directly.
 
+A file that does not validate, under the current `faultline.yaml`, is not shown at all: `GET` returns `# experiment withheld: it could not be redacted safely`, and `PUT` refuses to save over it. Redaction knows where secrets sit only in valid experiments, so a misshapen file (a duplicated key, a mapping where a list belongs) could otherwise show a secret. Fix the file directly; `faultline validate` names the problem.
+
 A fingerprint is a plain SHA-256. A short or guessable value (a weak password on its own as the whole body, for example) can be recovered from it by trying candidates, so keep real secrets out of experiments altogether.
 
 The request `body` is stored as part of the experiment. Keep it synthetic.

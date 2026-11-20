@@ -221,6 +221,7 @@ make test-load          # proxy latency overhead and throughput, with and withou
 make test-ui            # Playwright smoke test and axe accessibility audit in Chromium, Firefox and WebKit (needs Node)
 make lint               # go vet, gofmt, staticcheck
 make vuln               # govulncheck: known vulnerabilities in reachable Go code (needs network)
+make fuzz               # fuzz the untrusted-input parsers, 30s per target (FUZZTIME=5m for longer)
 make ui                 # rebuild the dashboard into internal/ui/dist
 make docker             # build both images
 ```

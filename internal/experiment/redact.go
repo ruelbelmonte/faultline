@@ -32,11 +32,14 @@ const unredactable = "# experiment withheld: it could not be redacted safely\n"
 // The input is returned untouched when nothing needed redacting, so the
 // stored copy stays byte-identical to what was submitted.
 //
-// It fails closed: a document that does not parse, or that uses aliases or
-// merge keys (which validation rejects), is replaced by a placeholder.
+// It fails closed: a document that does not validate is replaced by a
+// placeholder, because redaction knows where secrets sit only in valid shapes.
 func Redact(data []byte, cfg *config.Config) []byte {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 || yamlx.HasIndirection(doc.Content[0]) {
+		return []byte(unredactable)
+	}
+	if _, errs := Parse(data, cfg); len(errs) > 0 {
 		return []byte(unredactable)
 	}
 	sensitive := map[string]bool{}
