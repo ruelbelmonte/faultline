@@ -36,6 +36,22 @@ jobs:
       - name: Known vulnerabilities in reachable Go code
         run: make vuln
 
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Fuzz the untrusted-input parsers, 30s per target
+        run: make fuzz FUZZTIME=30s
+      - name: Keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures
+          path: internal/*/testdata/fuzz/
+
   race:
     runs-on: ubuntu-latest
     steps:

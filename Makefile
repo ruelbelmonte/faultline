@@ -5,7 +5,7 @@ LDFLAGS := -X faultline/internal/cli.Version=$(VERSION)
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.2
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
-.PHONY: build ui test test-integration test-race test-load test-ui lint vuln demo docker clean
+.PHONY: build ui test test-integration test-race test-load test-ui lint vuln fuzz demo docker clean
 
 # Builds both binaries. The web UI is embedded from internal/ui/dist, which is
 # committed, so this needs Go only. Run `make ui` first after changing ui/.
@@ -46,6 +46,15 @@ lint:
 # code actually reaches. Needs network access to vuln.go.dev.
 vuln:
 	$(GO) run $(GOVULNCHECK) ./...
+
+# Runs each fuzz target in turn; go test fuzzes one target per run.
+FUZZTIME ?= 30s
+FUZZ_TARGETS := experiment:FuzzParse experiment:FuzzRedact proxy:FuzzSplitHead proxy:FuzzInConnFeed proxy:FuzzRewriteHead
+fuzz:
+	@set -e; for t in $(FUZZ_TARGETS); do \
+		echo "== $${t#*:}"; \
+		$(GO) test ./internal/$${t%%:*} -run '^$$' -fuzz "^$${t#*:}\$$" -fuzztime $(FUZZTIME); \
+	done
 
 # Runs the demo system under test on its default ports.
 demo: build

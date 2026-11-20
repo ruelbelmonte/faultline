@@ -415,6 +415,22 @@ faults:
       status: 503
       headers: {!!binary U2V0LUNvb2tpZQ==: session=s3cr3t-value}
 `,
+		// Found by FuzzRedact: redaction walked only the first of two keys.
+		"duplicate traffic key": `version: 1
+name: dupkey
+target: {route: inventory}
+duration: 5s
+traffic:
+  base_url: http://127.0.0.1:9000
+  rps: 1
+  requests: [{path: /a}]
+traffic:
+  base_url: http://127.0.0.1:9000
+  rps: 1
+  requests: [{path: /a, headers: {Authorization: Bearer s3cr3t-value}}]
+faults:
+  - {id: f1, type: reset}
+`,
 	}
 	for name, doc := range docs {
 		t.Run(name, func(t *testing.T) {
@@ -479,6 +495,7 @@ traffic:
 faults:
   - {id: f1, type: reset}
 `
+	cfg.AllowCommands = true
 	out = string(Redact([]byte(cmdDoc), cfg))
 	if strings.Contains(out, secret) || !strings.Contains(out, "sha256:") {
 		t.Fatalf("traffic.command should be stored as its fingerprint:\n%s", out)
