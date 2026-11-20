@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"faultline/internal/config"
@@ -535,9 +534,9 @@ func errorClass(err error) string {
 	switch {
 	case errors.As(err, &dnsErr):
 		return "dns"
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case errors.Is(err, errConnRefused):
 		return "connection_refused"
-	case errors.Is(err, syscall.ECONNRESET):
+	case errors.Is(err, errConnReset):
 		return "connection_reset"
 	case errors.As(err, &certErr), errors.As(err, &recordErr):
 		return "tls"
