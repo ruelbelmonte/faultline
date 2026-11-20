@@ -81,7 +81,7 @@ pending -> prechecking -> injecting -> recovering -> completed
 4. **recovering.** Faults are cleared. Traffic and probes keep running until the system has recovered or `recovery.timeout` passes.
 5. **completed.** Hypothesis, verdict and findings are computed, the run is stored and the reports are written.
 
-A run is aborted by the kill switch (`kill_switch`), a manual abort (`manual`), an abort threshold (`threshold:error_rate_max`, `threshold:probe_failures_consecutive`), a control restart or shutdown (`control_restarted`), the proxy refusing or not receiving the rule set (`proxy_error`), or the proxy reporting the lease gone (`lease_lost`). On every abort the faults are cleared on the proxy before the aborted status is stored.
+A run is aborted by the kill switch (`kill_switch`), a manual abort (`manual`), an abort threshold (`threshold:error_rate_max`, `threshold:probe_failures_consecutive`), a control restart or shutdown (`control_restarted`), the proxy refusing or not receiving the rule set (`proxy_error`), the proxy reporting the lease gone (`lease_lost`), or a `traffic.command` whose shell cannot start (`traffic_command_failed`). On every abort the faults are cleared on the proxy before the aborted status is stored.
 
 If control is killed outright, nothing clears the faults for it. The lease does: after `lease_timeout` the proxy drops them. The next control process finds the unfinished run, clears the proxy once more and marks the run `aborted` with reason `control_restarted`.
 

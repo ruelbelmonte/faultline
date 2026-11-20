@@ -37,6 +37,7 @@ type stack struct {
 	extra        string
 	proxyExtra   string
 	controlExtra string
+	controlEnv   []string // extra environment for control, last value wins
 	demoArgs     []string // extra faultline-demo flags
 	routes       map[string]string
 	environment  string

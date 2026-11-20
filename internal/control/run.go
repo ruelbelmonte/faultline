@@ -26,6 +26,7 @@ const (
 	ReasonRestarted       = "control_restarted"
 	ReasonProxyError      = "proxy_error"
 	ReasonLeaseLost       = "lease_lost"
+	ReasonTrafficCommand  = "traffic_command_failed"
 	recoveryConsecutiveOK = 3
 	defaultRecoveryErrMax = 0.05
 	abortMinRequests      = 10

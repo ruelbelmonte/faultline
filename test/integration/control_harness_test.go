@@ -177,7 +177,7 @@ func startFull(t testing.TB, mode string, mods ...func(*stack)) *fullStack {
 		"llm":       "http://" + f.demo.llm,
 	}
 	f.proxy = s.startProxy(t)
-	f.control = s.startControl(t)
+	f.control = s.startControl(t, s.controlEnv...)
 	return f
 }
 

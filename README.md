@@ -198,7 +198,7 @@ Every finished run is compared with an earlier run of the same experiment (same 
 | One run at a time | Creating a run while another is active answers 409. |
 | Probe and traffic hosts | Link-local and cloud metadata addresses are refused, at validation and again at connect time. `control.allowed_hosts` restricts probes and traffic to the hosts you list. |
 | TLS for a remote admin URL | Control refuses an `http://` `proxy_admin_url` to a host that isn't loopback unless `control.allow_insecure_admin: true` is set. |
-| No shell commands by default | `traffic.command` is rejected unless `control.allow_commands: true`. With it on, the control token can run shell commands on the control host. |
+| No shell commands by default | `traffic.command` is rejected unless `control.allow_commands: true`. With it on, the control token can run shell commands on the control host. The shipped image has no shell, so command mode needs a binary install or an image with one; otherwise the run aborts with `traffic_command_failed`. |
 
 ## Security and data handling
 
