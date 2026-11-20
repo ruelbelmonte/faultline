@@ -121,7 +121,7 @@ func TestStore(t *testing.T) {
 	}
 
 	for _, action := range []string{"run_created", "kill_switch", "run_aborted"} {
-		if err := s.Audit(ActorToken, action, "run_a", map[string]any{"n": 1}); err != nil {
+		if err := s.Audit(Actor{Name: "token:default", IP: "192.0.2.10"}, action, "run_a", map[string]any{"n": 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,7 +131,7 @@ func TestStore(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "audit.jsonl"))
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 3 || !strings.Contains(lines[0], `"action":"run_created"`) || !strings.Contains(lines[0], `"actor":"api-token"`) {
+	if len(lines) != 3 || !strings.Contains(lines[0], `"action":"run_created"`) || !strings.Contains(lines[0], `"actor":"token:default","source_ip":"192.0.2.10"`) {
 		t.Fatalf("audit.jsonl must be append-only in order: %q", data)
 	}
 }

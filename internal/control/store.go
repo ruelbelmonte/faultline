@@ -83,6 +83,10 @@ func OpenStore(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialising database: %w", err)
 	}
+	if err := addAuditSourceIP(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("adding audit.source_ip: %w", err)
+	}
 	f, err := os.OpenFile(filepath.Join(dataDir, "audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		db.Close()
@@ -214,25 +218,37 @@ func (s *Store) Buckets(runID string) ([]*Bucket, error) {
 	return out, rows.Err()
 }
 
-type AuditEntry struct {
-	TS     report.Time    `json:"ts"`
-	Actor  string         `json:"actor"`
-	Action string         `json:"action"`
-	RunID  string         `json:"run_id"`
-	Detail map[string]any `json:"detail"`
+// addAuditSourceIP migrates a database created before audit.source_ip existed.
+func addAuditSourceIP(db *sql.DB) error {
+	var has bool
+	if err := db.QueryRow(`SELECT COUNT(*) > 0 FROM pragma_table_info('audit') WHERE name = 'source_ip'`).Scan(&has); err != nil || has {
+		return err
+	}
+	_, err := db.Exec(`ALTER TABLE audit ADD COLUMN source_ip TEXT NOT NULL DEFAULT ''`)
+	return err
 }
 
-const (
-	ActorToken  = "api-token"
-	ActorSystem = "system"
-)
+type AuditEntry struct {
+	TS       report.Time    `json:"ts"`
+	Actor    string         `json:"actor"`
+	SourceIP string         `json:"source_ip"`
+	Action   string         `json:"action"`
+	RunID    string         `json:"run_id"`
+	Detail   map[string]any `json:"detail"`
+}
+
+// Actor is who an audit entry is attributed to: "token:<name>" with the
+// request's source address, or "system" for automatic actions (D112).
+type Actor struct{ Name, IP string }
+
+var ActorSystem = Actor{Name: "system"}
 
 // Audit appends an entry to SQLite and audit.jsonl. Entries are never updated or deleted.
-func (s *Store) Audit(actor, action, runID string, detail map[string]any) error {
+func (s *Store) Audit(actor Actor, action, runID string, detail map[string]any) error {
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	e := AuditEntry{TS: report.At(time.Now()), Actor: actor, Action: action, RunID: runID, Detail: detail}
+	e := AuditEntry{TS: report.At(time.Now()), Actor: actor.Name, SourceIP: actor.IP, Action: action, RunID: runID, Detail: detail}
 	detailJSON, err := json.Marshal(detail)
 	if err != nil {
 		return err
@@ -243,8 +259,8 @@ func (s *Store) Audit(actor, action, runID string, detail map[string]any) error 
 	}
 	s.auditMu.Lock()
 	defer s.auditMu.Unlock()
-	if _, err := s.db.Exec(`INSERT INTO audit (ts, actor, action, run_id, detail) VALUES (?, ?, ?, ?, ?)`,
-		e.TS.Format(time.RFC3339), actor, action, runID, string(detailJSON)); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO audit (ts, actor, source_ip, action, run_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
+		e.TS.Format(time.RFC3339), actor.Name, actor.IP, action, runID, string(detailJSON)); err != nil {
 		return err
 	}
 	_, err = s.auditFile.Write(append(line, '\n'))
@@ -252,7 +268,7 @@ func (s *Store) Audit(actor, action, runID string, detail map[string]any) error 
 }
 
 func (s *Store) AuditLog(limit int) ([]AuditEntry, error) {
-	rows, err := s.db.Query(`SELECT ts, actor, action, run_id, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT ts, actor, source_ip, action, run_id, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +277,7 @@ func (s *Store) AuditLog(limit int) ([]AuditEntry, error) {
 	for rows.Next() {
 		var e AuditEntry
 		var ts, detail string
-		if err := rows.Scan(&ts, &e.Actor, &e.Action, &e.RunID, &detail); err != nil {
+		if err := rows.Scan(&ts, &e.Actor, &e.SourceIP, &e.Action, &e.RunID, &detail); err != nil {
 			return nil, err
 		}
 		t, err := time.Parse(time.RFC3339, ts)

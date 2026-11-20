@@ -36,3 +36,16 @@ func TestUpChildEnvTokens(t *testing.T) {
 		}
 	}
 }
+
+// Issue #17: with named tokens, control gets the tokens file and no shared token.
+func TestUpChildEnvTokensFile(t *testing.T) {
+	parent := []string{config.EnvTokensFile + "=/etc/faultline/tokens"}
+	tokens := map[string]string{config.EnvTokensFile: "/etc/faultline/tokens", config.EnvAdminToken: "admin-token-0123456789"}
+	control := strings.Join(childEnv("control", parent, tokens), "\n")
+	if !strings.Contains(control, config.EnvTokensFile+"=/etc/faultline/tokens") || strings.Contains(control, config.EnvToken+"=") {
+		t.Fatalf("control must get the tokens file and no %s:\n%s", config.EnvToken, control)
+	}
+	if proxy := strings.Join(childEnv("proxy", parent, tokens), "\n"); strings.Contains(proxy, config.EnvTokensFile) {
+		t.Fatalf("the proxy child does not need the tokens file:\n%s", proxy)
+	}
+}

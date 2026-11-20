@@ -118,7 +118,7 @@ While a run is active, control keeps the part of each of its request records tha
 | POST | `/api/v1/kill` | Clears proxy faults, aborts any active run. 200 `{cleared:true}` |
 | GET | `/api/v1/faults/active` | The proxy's `faults/active`, passed through |
 | GET | `/api/v1/runs/{id}/report?format=json\|md\|html\|junit` | The report as a download; 409 until the run has finished |
-| GET | `/api/v1/audit?limit=` | Newest first: `[{ts, actor, action, run_id, detail}]` |
+| GET | `/api/v1/audit?limit=` | Newest first: `[{ts, actor, source_ip, action, run_id, detail}]`. `actor` is `token:<name>` or `system`; `source_ip` is `""` for `system` and for entries written before it existed |
 | GET | `/api/v1/meta` | `{environment, allow_unscoped, scope_header}`, used by the dashboard |
 
 Timestamps in the control API are RFC 3339, UTC, second precision. Run ids are `run_` followed by 12 lowercase base32 characters.

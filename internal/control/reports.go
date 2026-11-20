@@ -63,7 +63,7 @@ func (c *Control) handleReport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	c.audit(ActorToken, "report_downloaded", id, map[string]any{"format": format})
+	c.audit(actorFrom(r), "report_downloaded", id, map[string]any{"format": format})
 	w.Header().Set("Content-Type", report.ContentType(format))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-report.%s"`, id, report.Ext(format)))
 	w.Header().Set("Cache-Control", "no-store")

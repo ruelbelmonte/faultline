@@ -1,8 +1,11 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -199,5 +202,81 @@ func TestEnvWithoutTokens(t *testing.T) {
 		if !strings.Contains(got, keep) {
 			t.Fatalf("%q must be kept: %s", keep, got)
 		}
+	}
+}
+
+// Issue #17: several named control tokens, stored as SHA-256 hashes.
+func TestLoadTokens(t *testing.T) {
+	const alice, bob = "synthetic-alice-token-0123456789", "synthetic-bob-token-0123456789"
+	sum := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+	file := func(content string) string {
+		p := filepath.Join(t.TempDir(), "tokens")
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	t.Setenv(EnvTokensFile, "")
+	t.Setenv(EnvToken, alice)
+	got, err := LoadTokens()
+	if err != nil || len(got) != 1 || got[0].Name != "default" || got[0].Sum != sha256.Sum256([]byte(alice)) {
+		t.Fatalf("FAULTLINE_TOKEN alone must be the token named default: %v %+v", err, got)
+	}
+
+	t.Setenv(EnvToken, "")
+	t.Setenv(EnvTokensFile, file("# team tokens\nalice:"+sum(alice)+"\n\n  bob : "+strings.ToUpper(sum(bob))+"  \n"))
+	got, err = LoadTokens()
+	if err != nil || len(got) != 2 || got[0].Name != "alice" || got[1].Name != "bob" || got[1].Sum != sha256.Sum256([]byte(bob)) {
+		t.Fatalf("tokens file: %v %+v", err, got)
+	}
+
+	t.Setenv(EnvToken, alice)
+	if _, err := LoadTokens(); err == nil || !strings.Contains(err.Error(), EnvToken) || !strings.Contains(err.Error(), EnvTokensFile) {
+		t.Fatalf("both set must be refused, naming both: %v", err)
+	}
+
+	t.Setenv(EnvToken, "")
+	t.Setenv(EnvTokensFile, "")
+	if _, err := LoadTokens(); err == nil {
+		t.Fatal("neither set must be refused")
+	}
+
+	for name, content := range map[string]string{
+		"empty":          "# nothing\n",
+		"no colon":       "alice " + sum(alice) + "\n",
+		"short hash":     "alice:abc123\n",
+		"not hex":        "alice:" + strings.Repeat("zz", 32) + "\n",
+		"bad name":       "Alice Smith:" + sum(alice) + "\n",
+		"duplicate name": "alice:" + sum(alice) + "\nalice:" + sum(bob) + "\n",
+		"duplicate hash": "alice:" + sum(alice) + "\nbob:" + sum(alice) + "\n",
+		"empty token":    "alice:" + sum("") + "\n",
+	} {
+		t.Setenv(EnvTokensFile, file(content))
+		_, err := LoadTokens()
+		if err == nil {
+			t.Errorf("%s: must be rejected", name)
+			continue
+		}
+		if strings.Contains(err.Error(), sum(alice)) || strings.Contains(err.Error(), sum(bob)) {
+			t.Errorf("%s: the error repeats a token hash: %v", name, err)
+		}
+	}
+	t.Setenv(EnvTokensFile, filepath.Join(t.TempDir(), "missing"))
+	if _, err := LoadTokens(); err == nil {
+		t.Fatal("a missing tokens file must be refused")
+	}
+}
+
+func TestTrustedProxies(t *testing.T) {
+	c, err := Parse([]byte("version: 1\ncontrol:\n  trusted_proxies: ['10.0.0.0/8', '192.168.1.5', 'fd00::/8']\n"))
+	if err != nil || len(c.TrustedProxies) != 3 || c.TrustedProxies[1].String() != "192.168.1.5/32" {
+		t.Fatalf("trusted_proxies: %v %+v", err, c.TrustedProxies)
+	}
+	if _, err := Parse([]byte("version: 1\ncontrol:\n  trusted_proxies: ['proxy.internal']\n")); err == nil || !strings.Contains(err.Error(), "trusted_proxies[0]") {
+		t.Fatalf("a host name must be rejected: %v", err)
+	}
+	if c, _ := Parse([]byte("version: 1\n")); len(c.TrustedProxies) != 0 {
+		t.Fatal("trusted_proxies must default to empty")
 	}
 }

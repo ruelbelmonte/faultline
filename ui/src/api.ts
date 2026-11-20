@@ -228,6 +228,7 @@ export interface ExperimentEntry {
 export interface AuditEntry {
   ts: string
   actor: string
+  source_ip: string
   action: string
   run_id: string
   detail: Record<string, unknown>
