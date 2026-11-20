@@ -811,6 +811,56 @@ func TestExperimentsAPI(t *testing.T) {
 	}
 }
 
+// Issue #15: saving from the UI must not replace a secret on disk with the
+// redacted copy, nor create name.yaml beside an existing name.yml.
+func TestExperimentPutKeepsFilesOnDisk(t *testing.T) {
+	f := startFull(t, "naive")
+	dir := filepath.Join(f.s.dir, "experiments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "Bearer synthetic-secret-0042"
+	withSecret := f.experiment(t, expOpts{Name: "secret", Requests: `    - {method: GET, path: /api/orders/1, headers: {Authorization: "` + secret + `"}}`})
+	os.WriteFile(filepath.Join(dir, "secret.yaml"), []byte(withSecret), 0o644)
+
+	var got map[string]string
+	f.control.api(t, "GET", "/api/v1/experiments/secret", nil, &got)
+	if strings.Contains(got["yaml"], secret) || !strings.Contains(got["yaml"], "[REDACTED]") {
+		t.Fatalf("GET must redact: %s", got["yaml"])
+	}
+	edited := strings.Replace(withSecret, "rps: ", "rps: 1", 1)
+	for name, body := range map[string]string{"unchanged redacted copy": got["yaml"], "new real value": edited} {
+		var resp map[string]any
+		if code := f.control.api(t, "PUT", "/api/v1/experiments/secret", obj{"yaml": body}, &resp); code != 409 || resp["error"] != "contains_redacted_values" {
+			t.Errorf("PUT %s over a file with secrets: expected 409 contains_redacted_values, got %d %v", name, code, resp)
+		}
+	}
+	if onDisk, _ := os.ReadFile(filepath.Join(dir, "secret.yaml")); string(onDisk) != withSecret {
+		t.Fatalf("the file with the secret was changed:\n%s", onDisk)
+	}
+
+	legacy := f.experiment(t, expOpts{Name: "legacy"})
+	os.WriteFile(filepath.Join(dir, "legacy.yml"), []byte(legacy), 0o644)
+	legacyEdited := strings.Replace(legacy, "description: integration test experiment", "description: edited", 1)
+	var saved map[string]string
+	if code := f.control.api(t, "PUT", "/api/v1/experiments/legacy", obj{"yaml": legacyEdited}, &saved); code != 200 || saved["file"] != "legacy.yml" {
+		t.Fatalf("PUT over legacy.yml: %d %v", code, saved)
+	}
+	if onDisk, _ := os.ReadFile(filepath.Join(dir, "legacy.yml")); string(onDisk) != legacyEdited {
+		t.Fatalf("legacy.yml was not updated:\n%s", onDisk)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "legacy.yaml")); err == nil {
+		t.Fatal("legacy.yaml was created and now hides legacy.yml")
+	}
+
+	os.WriteFile(filepath.Join(dir, "dup.yaml"), []byte(legacy), 0o644)
+	os.WriteFile(filepath.Join(dir, "dup.yml"), []byte(legacy), 0o644)
+	var resp map[string]any
+	if code := f.control.api(t, "PUT", "/api/v1/experiments/dup", obj{"yaml": legacyEdited}, &resp); code != 409 || resp["error"] != "ambiguous_experiment_file" {
+		t.Fatalf("PUT with both dup.yaml and dup.yml: expected 409 ambiguous_experiment_file, got %d %v", code, resp)
+	}
+}
+
 func TestAuditOrderAndLimit(t *testing.T) {
 	f := startFull(t, "naive")
 	good := f.experiment(t, expOpts{})

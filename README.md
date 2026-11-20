@@ -202,7 +202,7 @@ CI also checks the supply chain: `govulncheck` on the Go code, `npm audit --audi
 - LLM faults understand the Anthropic Messages API and OpenAI chat completions (`/chat/completions`). Other OpenAI endpoints, such as the Responses API, are not covered.
 - One run at a time per control plane. No user accounts, RBAC or SSO: one token for the control API, one for the proxy admin API.
 - Proxy and control compare absolute times, so their clocks need to be in sync (NTP is enough).
-- An experiment with a request body, a command, a sensitive header value or credentials in a URL cannot be run from the dashboard editor, which only ever sees the redacted copy; run it from its file.
+- An experiment with a request body, a command, a sensitive header value or credentials in a URL cannot be run or saved from the dashboard editor, which only ever sees the redacted copy; run and edit it from its file.
 
 ## License
 

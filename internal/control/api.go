@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -180,6 +181,29 @@ func (c *Control) handleExperimentPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file := name + ".yaml"
+	var existing []string
+	for _, ext := range []string{".yaml", ".yml"} {
+		if _, err := os.Stat(filepath.Join(c.cfg.ExperimentsDir, name+ext)); err == nil {
+			existing = append(existing, name+ext)
+		}
+	}
+	switch len(existing) {
+	case 2:
+		writeError(w, http.StatusConflict, "ambiguous_experiment_file")
+		return
+	case 1:
+		file = existing[0]
+		old, err := os.ReadFile(filepath.Join(c.cfg.ExperimentsDir, file))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "read_failed")
+			return
+		}
+		// Writing always redacts, so saving over a file with sensitive values would destroy them (D109).
+		if !bytes.Equal(experiment.Redact(old, c.cfg), old) {
+			writeError(w, http.StatusConflict, "contains_redacted_values")
+			return
+		}
+	}
 	// Control never writes sensitive header values to disk, here included.
 	data := experiment.Redact([]byte(body.YAML), c.cfg)
 	if err := os.WriteFile(filepath.Join(c.cfg.ExperimentsDir, file), data, 0o644); err != nil {
