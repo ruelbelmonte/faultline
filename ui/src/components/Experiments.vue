@@ -76,6 +76,10 @@ function showErrors(e: unknown, fallback: string) {
     errors.value = e.errors
     validated.value = 'invalid'
     say('The experiment is not valid.', true)
+  } else if (e instanceof ApiError && e.code === 'contains_redacted_values') {
+    say('The file on disk holds redacted values, such as a secret header, that saving from here would destroy. Edit the file directly.', true)
+  } else if (e instanceof ApiError && e.code === 'ambiguous_experiment_file') {
+    say('Both a .yaml and a .yml file exist under this name. Remove one of them first.', true)
   } else if (e instanceof ApiError && e.status === 409) {
     say('Another run is active. Wait for it to finish or use the kill switch.', true)
   } else {
