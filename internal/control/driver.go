@@ -118,7 +118,16 @@ func (r *Run) driveCommand(ctx context.Context, command string) {
 			"FAULTLINE_RUN_ID="+r.id,
 			"FAULTLINE_SCOPE_HEADER="+r.c.cfg.ScopeHeader,
 		)
-		if err := cmd.Run(); err != nil && ctx.Err() == nil {
+		if err := cmd.Start(); err != nil {
+			// No process exists, so no attempt will ever drive traffic, for
+			// example in the distroless image, which has no shell.
+			if ctx.Err() == nil {
+				r.c.log.Error("traffic command could not start", "run_id", r.id, "error", err.Error())
+				r.abort(ReasonTrafficCommand, ActorSystem)
+			}
+			return
+		}
+		if err := cmd.Wait(); err != nil && ctx.Err() == nil {
 			r.c.log.Warn("traffic command failed", "run_id", r.id, "error", err.Error())
 		}
 		select {

@@ -684,6 +684,34 @@ faults:
 	}
 }
 
+// Issue #18: with no shell on PATH, as in the distroless image, the traffic
+// command can never start. The run must abort at once with a stated reason
+// instead of injecting for its whole duration and passing on probes alone.
+func TestTrafficCommandThatCannotStartAbortsTheRun(t *testing.T) {
+	f := startFull(t, "naive", func(s *stack) {
+		s.controlExtra = "  allow_commands: true\n"
+		s.controlEnv = []string{"PATH="}
+	})
+	yaml := `version: 1
+name: command-no-shell
+target: {route: inventory}
+duration: 60s
+traffic:
+  command: 'echo unreachable'
+recovery: {timeout: 1s}
+faults:
+  - {id: f1, type: latency, params: {ms: 1}}
+`
+	id := f.control.createRun(t, yaml)
+	doc := f.control.waitDone(t, id, 20*time.Second)
+	if doc.Status != "aborted" || doc.verdict() != "aborted" || doc.reason() != "traffic_command_failed" {
+		t.Fatalf("expected aborted (traffic_command_failed), got %s/%s (%s)", doc.Status, doc.verdict(), doc.reason())
+	}
+	if a := f.proxy.active(t); a.RunID != nil || len(a.Faults) != 0 {
+		t.Fatalf("the faults must be cleared: %+v", a)
+	}
+}
+
 func TestControlAuth(t *testing.T) {
 	f := startFull(t, "naive")
 	var health map[string]bool
