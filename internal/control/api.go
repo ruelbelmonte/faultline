@@ -233,7 +233,7 @@ func (c *Control) handleExperimentPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_experiment", "errors": errs})
 		return
 	}
-	if err := os.MkdirAll(c.cfg.ExperimentsDir, 0o755); err != nil {
+	if err := os.MkdirAll(c.cfg.ExperimentsDir, 0o750); err != nil {
 		writeError(w, http.StatusInternalServerError, "write_failed")
 		return
 	}
@@ -263,7 +263,7 @@ func (c *Control) handleExperimentPut(w http.ResponseWriter, r *http.Request) {
 	}
 	// Control never writes sensitive header values to disk, here included.
 	data := experiment.Redact([]byte(body.YAML), c.cfg)
-	if err := os.WriteFile(filepath.Join(c.cfg.ExperimentsDir, file), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(c.cfg.ExperimentsDir, file), data, 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "write_failed")
 		return
 	}

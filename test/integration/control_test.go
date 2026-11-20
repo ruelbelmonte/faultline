@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -771,6 +772,13 @@ func TestExperimentsAPI(t *testing.T) {
 	onDisk, err := os.ReadFile(filepath.Join(f.s.dir, "experiments", "saved.yaml"))
 	if err != nil || string(onDisk) != good {
 		t.Fatalf("file not written as submitted: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		dirInfo, _ := os.Stat(filepath.Join(f.s.dir, "experiments"))
+		fileInfo, _ := os.Stat(filepath.Join(f.s.dir, "experiments", "saved.yaml"))
+		if dirInfo.Mode().Perm()&^0o750 != 0 || fileInfo.Mode().Perm()&^0o640 != 0 {
+			t.Fatalf("experiments dir %v and file %v must not be readable by others (issue #22)", dirInfo.Mode().Perm(), fileInfo.Mode().Perm())
+		}
 	}
 	var got map[string]string
 	if code := f.control.api(t, "GET", "/api/v1/experiments/saved", nil, &got); code != 200 || got["name"] != "saved" || got["file"] != "saved.yaml" || got["yaml"] != good {

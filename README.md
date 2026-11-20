@@ -129,9 +129,10 @@ faultline run <file|dir> [--fail-on-breach] [--report-dir DIR] [--format json,md
 faultline status [--url URL]
 faultline stop [--url URL]
 faultline report <run_id> --format F [--out FILE] [--url URL]
+faultline audit verify [--config FILE]
 ```
 
-`proxy`, `control` and `up` also take `--log-format text|json`.
+`proxy`, `control` and `up` also take `--log-format text|json`. `audit verify` checks the audit log's hash chain and that SQLite holds the same entries. It exits 0 when both hold and 10 with one line per problem otherwise, and it can run beside a live control plane.
 
 | Variable | Used by | Meaning |
 |---|---|---|
@@ -176,7 +177,7 @@ Across several files the worst result wins: 12, then 10, then 11, then 0. `--rep
 - Values of headers listed in `redaction.headers` are replaced with `[REDACTED]` wherever they could be stored or shown, including inside a saved experiment. Request bodies and `traffic.command` are stored as a SHA-256 fingerprint and length, URL credentials are removed, and secret-looking query parameter values are replaced. The run keeps the real values in memory only. See [docs/experiments.md](docs/experiments.md#redaction).
 - Tokens are compared in constant time and are never logged. Processes Faultline starts get only the tokens they need: the traffic command gets none, and under `faultline up` the proxy gets the admin token only.
 - All listeners bind to `127.0.0.1` by default. To expose them in QA, see [docs/qa-deployment.md](docs/qa-deployment.md): restrict the network, terminate TLS in front of the control plane, and keep the proxy admin port private.
-- The audit log (`{data_dir}/audit.jsonl` and SQLite) is append-only from the application's side. It is not tamper-proof against someone with access to the files.
+- The audit log (`{data_dir}/audit.jsonl` and SQLite) is append-only from the application's side, and each line of `audit.jsonl` carries a hash of everything before it. `faultline audit verify` detects a line that was edited, deleted or reordered. That makes the file tamper-evident, not tamper-proof: someone who can write to it can also rewrite the whole chain. Ship it to an append-only store off the host if that matters.
 - The experiment file's `traffic.requests[].body` is sent as written and stored only as a SHA-256 fingerprint, which a short or guessable value can be recovered from. Keep it synthetic.
 
 ## Development

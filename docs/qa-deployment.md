@@ -84,7 +84,8 @@ Keep the clocks of the proxy and control hosts in sync (NTP). Fault windows are 
 Under `data_dir`, on the control plane's volume:
 
 - `faultline.db`: runs, per-second metrics, audit entries, and the redacted copy of each experiment. While a run is active it also holds timing rows for that run's proxied requests (no method, path or status, and a salted hash instead of the correlation id); they are deleted when the run ends.
-- `audit.jsonl`: the audit log, append-only from the application's side. It is a plain file; protect it with file permissions and ship it to your log store if you need it to be tamper-evident.
+- `audit.jsonl`: the audit log, append-only from the application's side. Each line carries a hash of everything before it, and `faultline audit verify --config faultline.yaml` reports any line that was edited, deleted or reordered, and any difference from the copy in SQLite. Someone who can write the file can still rewrite the whole chain, so the control that counts is shipping each line as it is written to an append-only store off the host, for example a log agent tailing the file into object storage with object lock or a SIEM. Run `audit verify` on a schedule and alert on a non-zero exit.
+- `experiments_dir`: control creates it with mode 0750 and saved experiments with 0640. Files you put there yourself keep their own permissions.
 - `reports/{run_id}/`: the four report files.
 
 Not kept: request or response bodies, header values, query strings of proxied requests. In the stored copy of an experiment, values of headers listed in `redaction.headers` are `[REDACTED]`, request bodies and `traffic.command` are fingerprints (SHA-256 and length), URL credentials are removed and secret-looking query values are `REDACTED`. The data directory is created with owner-only permissions. Give it a persistent volume if run history matters, and delete it to forget everything.
