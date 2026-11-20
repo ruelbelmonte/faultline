@@ -41,7 +41,7 @@ Faultline has three runtime pieces. The proxy and the control plane are separate
 
 **MCP tool calls.** For the four `mcp_*` fault types the proxy has to know whether a request is a `tools/call`. When such a fault of the active run matches a request on scope, route, method, path and time window, the proxy reads up to 1 MiB of the request body, decides, and forwards the bytes unchanged. No other request body is ever read by the proxy, and nothing of it is stored. See [mcp-faults.md](mcp-faults.md).
 
-**Request records.** While a rule set is installed, every request on a route is recorded in a bounded in-memory ring (200,000 entries): route, method, path without query string, status, duration, whether it carried the run id, correlation id, fault id and type, the `Retry-After` the proxy sent, and for holds how long the client stayed connected. No header values, no bodies. Path, correlation id and method are length-capped. Control reads the ring every second during injection; if the ring ever wraps before a record was read, the proxy logs a warning naming the run, because that run's findings are then based on incomplete records.
+**Request records.** While a rule set is installed, every request of the run is recorded in a bounded in-memory ring (200,000 entries): route, method, path without query string, status, duration, whether it carried the run id, correlation id, fault id and type, the `Retry-After` the proxy sent, and for holds how long the client stayed connected. Under header scoping only requests carrying the run id are recorded; under `scope: all` every request on a route is. No header values, no bodies. Path, correlation id and method are length-capped. Clearing the faults, by `DELETE /admin/v1/faults`, lease expiry or shutdown, or installing another run's faults over them, deletes the run's records, and requests that finish after the clear are not recorded, so control reads the ring before it clears. Control reads the ring every second during injection; if the ring ever wraps before a record was read, the proxy logs a warning naming the run, because that run's findings are then based on incomplete records.
 
 ### Fault lifetime
 
@@ -59,10 +59,10 @@ Because 1 compares absolute times set by control against the proxy's clock, the 
 |---|---|---|
 | GET | `/admin/v1/healthz` | No auth. `{"ok":true}` |
 | PUT | `/admin/v1/faults` | Install `{run_id, scope_mode, lease_id, seed?, faults:[{id, type, route, match, strategy, params, start_at, end_at}]}` |
-| DELETE | `/admin/v1/faults` | Clear all faults |
+| DELETE | `/admin/v1/faults` | Clear all faults and delete the run's records |
 | POST | `/admin/v1/lease/renew` | `{lease_id}`. 404 when nothing is installed, 409 for another lease |
 | GET | `/admin/v1/faults/active` | `{run_id, lease_id, faults:[{id, type, route, start_at, end_at, triggers}]}` or `{run_id:null, faults:[]}` |
-| GET | `/admin/v1/records?run_id=&since=` | `{records, next}`; records with `seq > since`, at most 5000 per call |
+| GET | `/admin/v1/records?run_id=&since=` | `{records, next}`; the run's records with `seq > since`, at most 5000 per call. `run_id` is required: 400 `{"error":"missing_run_id"}` without it |
 | GET | `/admin/v1/stats` | `{run_id, active, routes, faults, events}` |
 
 ## Control plane

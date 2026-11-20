@@ -664,11 +664,11 @@ func TestScoping(t *testing.T) {
 			want    int
 			scoped  bool
 		}{
-			{"own run id", scoped(testRun), 503, true},
 			{"no header", nil, 200, false},
 			{"another run id", scoped("run_bbbbbbbbbbbb"), 200, false},
 			{"prefix of the run id", scoped(testRun[:10]), 200, false},
 			{"empty header", scoped(""), 200, false},
+			{"own run id", scoped(testRun), 503, true},
 		}
 		for _, tc := range cases {
 			res := call("GET", p.url("/svc/x"), tc.headers, "")
@@ -679,14 +679,10 @@ func TestScoping(t *testing.T) {
 				t.Errorf("%s: pass-through response carries a fault header", tc.name)
 			}
 		}
-		recs := p.recordsN(t, testRun, len(cases))
-		if len(recs) != len(cases) {
-			t.Fatalf("every request during a run is recorded, scoped or not: got %d records", len(recs))
-		}
-		for i, tc := range cases {
-			if recs[i].Scoped != tc.scoped || (recs[i].FaultID != nil) != (tc.want == 503) {
-				t.Errorf("%s: unexpected record %+v", tc.name, recs[i])
-			}
+		// The scoped request goes last, so an unscoped record would already be there.
+		recs := p.recordsN(t, testRun, 1)
+		if len(recs) != 1 || !recs[0].Scoped || recs[0].FaultID == nil {
+			t.Fatalf("only the run's own request may be recorded under header scope, got %+v", recs)
 		}
 		if n := p.triggers(t, "f1"); n != 1 {
 			t.Fatalf("triggers = %d, want 1", n)
@@ -694,11 +690,16 @@ func TestScoping(t *testing.T) {
 	})
 
 	t.Run("scope all", func(t *testing.T) {
+		p.clear(t)
 		p.install(t, testRun, "all", flt("f1", "http_error", "svc", obj{"status": 503}))
 		for _, h := range []map[string]string{nil, scoped(testRun), scoped("run_bbbbbbbbbbbb")} {
 			if res := call("GET", p.url("/svc/x"), h, ""); res.status != 503 {
 				t.Fatalf("scope all must fault every request, got %d for %v", res.status, h)
 			}
+		}
+		recs := p.recordsN(t, testRun, 3)
+		if len(recs) != 3 || recs[0].Scoped || !recs[1].Scoped || recs[2].Scoped {
+			t.Fatalf("scope all records every request: %+v", recs)
 		}
 	})
 
@@ -896,7 +897,7 @@ func TestRecordsAndStats(t *testing.T) {
 
 	// Nothing is recorded outside a run.
 	call("GET", p.url("/svc/before"), scoped(testRun), "")
-	if recs, next := p.records(t, "", 0); len(recs) != 0 || next != 0 {
+	if recs, next := p.records(t, testRun, 0); len(recs) != 0 || next != 0 {
 		t.Fatalf("requests outside a run must not be recorded: %+v", recs)
 	}
 	var idle obj
@@ -908,17 +909,17 @@ func TestRecordsAndStats(t *testing.T) {
 	const secret = "Bearer itest-secret-value-9f3a"
 	p.install(t, testRun, "header", flt("f1", "http_error", "svc", obj{"status": 503, "retry_after": 1}, match("GET", "/fail/*")))
 	call("GET", p.url("/svc/fail/1?token=query-secret"), map[string]string{"X-Chaos-Run": testRun, "X-Chaos-Correlation": "corr-a", "Authorization": secret}, "")
-	call("POST", p.url("/svc/ok"), map[string]string{"X-Chaos-Run": testRun, "X-Chaos-Correlation": "corr-a", "Cookie": "session=" + secret}, "body-secret")
 	call("GET", p.url("/svc/ok"), nil, "")
+	call("POST", p.url("/svc/ok"), map[string]string{"X-Chaos-Run": testRun, "X-Chaos-Correlation": "corr-a", "Cookie": "session=" + secret}, "body-secret")
 
-	p.recordsN(t, testRun, 3)
+	p.recordsN(t, testRun, 2)
 	var page struct {
 		Records []obj
 		Next    float64
 	}
 	p.adminCall(t, "GET", "/admin/v1/records?run_id="+testRun+"&since=0", nil, &page)
-	if len(page.Records) != 3 || page.Next != 3 {
-		t.Fatalf("expected 3 records and next=3, got %d and %v", len(page.Records), page.Next)
+	if len(page.Records) != 2 || page.Next != 2 {
+		t.Fatalf("expected the 2 scoped records and next=2, got %d and %v: %v", len(page.Records), page.Next, page.Records)
 	}
 	wantKeys := []string{"seq", "ts", "route", "method", "path", "status", "duration_ms", "scoped", "correlation", "fault_id", "fault_type", "retry_after", "client_held_ms"}
 	for _, rec := range page.Records {
@@ -931,7 +932,7 @@ func TestRecordsAndStats(t *testing.T) {
 			}
 		}
 	}
-	first, second, third := page.Records[0], page.Records[1], page.Records[2]
+	first, second := page.Records[0], page.Records[1]
 	if first["seq"] != float64(1) || first["route"] != "svc" || first["method"] != "GET" || first["path"] != "/fail/1" ||
 		first["status"] != float64(503) || first["scoped"] != true || first["correlation"] != "corr-a" ||
 		first["fault_id"] != "f1" || first["fault_type"] != "http_error" || first["retry_after"] != float64(1) || first["client_held_ms"] != nil {
@@ -943,9 +944,6 @@ func TestRecordsAndStats(t *testing.T) {
 	if second["status"] != float64(200) || second["fault_id"] != nil || second["fault_type"] != nil || second["retry_after"] != nil || second["method"] != "POST" {
 		t.Fatalf("unexpected pass-through record: %v", second)
 	}
-	if third["scoped"] != false || third["correlation"] != "" {
-		t.Fatalf("unexpected unscoped record: %v", third)
-	}
 
 	// Header values, query strings and bodies never reach the records.
 	all, _ := json.Marshal(page)
@@ -955,17 +953,23 @@ func TestRecordsAndStats(t *testing.T) {
 		}
 	}
 
-	if recs, next := p.records(t, testRun, 2); len(recs) != 1 || recs[0].Seq != 3 || next != 3 {
-		t.Fatalf("since=2 should return only seq 3: %+v next=%d", recs, next)
+	if recs, next := p.records(t, testRun, 1); len(recs) != 1 || recs[0].Seq != 2 || next != 2 {
+		t.Fatalf("since=1 should return only seq 2: %+v next=%d", recs, next)
 	}
-	if recs, next := p.records(t, testRun, 3); len(recs) != 0 || next != 3 {
-		t.Fatalf("since=3 should return nothing: %+v next=%d", recs, next)
+	if recs, next := p.records(t, testRun, 2); len(recs) != 0 || next != 2 {
+		t.Fatalf("since=2 should return nothing: %+v next=%d", recs, next)
 	}
 	if recs, _ := p.records(t, "run_bbbbbbbbbbbb", 0); len(recs) != 0 {
 		t.Fatalf("records of another run id leaked: %+v", recs)
 	}
-	if code := p.adminCall(t, "GET", "/admin/v1/records?since=abc", nil, nil); code != 400 {
+	if code := p.adminCall(t, "GET", "/admin/v1/records?run_id="+testRun+"&since=abc", nil, nil); code != 400 {
 		t.Fatalf("invalid since: expected 400, got %d", code)
+	}
+	for _, path := range []string{"/admin/v1/records", "/admin/v1/records?since=0", "/admin/v1/records?run_id=&since=0"} {
+		var body obj
+		if code := p.adminCall(t, "GET", path, nil, &body); code != 400 || body["error"] != "missing_run_id" || len(body) != 1 {
+			t.Fatalf("%s: expected 400 {error: missing_run_id}, got %d %v", path, code, body)
+		}
 	}
 
 	var stats struct {
@@ -985,8 +989,99 @@ func TestRecordsAndStats(t *testing.T) {
 	if stats.Active || stats.Faults["f1"] != 1 || *stats.RunID != testRun {
 		t.Fatalf("stats after clear: %+v", stats)
 	}
-	if recs, _ := p.records(t, testRun, 0); len(recs) != 3 {
-		t.Fatalf("records must stay readable after clear, got %d", len(recs))
+	if recs, _ := p.records(t, testRun, 0); len(recs) != 0 {
+		t.Fatalf("clearing the faults must delete the run's records, got %+v", recs)
+	}
+}
+
+// Issue #14: paths of traffic outside the run can carry other teams'
+// identifiers, so the proxy neither keeps nor returns them.
+func TestUnscopedTrafficIsNeverRecorded(t *testing.T) {
+	p, _ := startEchoProxy(t)
+	const unscopedPath = "/svc/patients/synthetic-pt-7731/records/synthetic-rec-0042"
+	p.install(t, testRun, "header", flt("f1", "http_error", "svc", obj{"status": 503}, match("GET", "/fail/*")))
+	for _, h := range []map[string]string{nil, scoped("run_bbbbbbbbbbbb"), {"X-Chaos-Correlation": "synthetic-corr-unscoped"}} {
+		call("GET", p.url(unscopedPath), h, "")
+		call("GET", p.url("/svc/fail/x"), h, "")
+	}
+	call("GET", p.url("/svc/fail/own"), scoped(testRun), "")
+
+	recs := p.recordsN(t, testRun, 1)
+	if len(recs) != 1 || recs[0].Path != "/fail/own" || !recs[0].Scoped {
+		t.Fatalf("expected only the run's own request, got %+v", recs)
+	}
+	for _, path := range []string{
+		"/admin/v1/records?run_id=" + testRun + "&since=0",
+		"/admin/v1/records?run_id=run_bbbbbbbbbbbb&since=0",
+		"/admin/v1/records?since=0",
+		"/admin/v1/stats",
+		"/admin/v1/faults/active",
+	} {
+		req, _ := http.NewRequest("GET", p.admin(path), nil)
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		for _, leak := range []string{"synthetic-pt-7731", "synthetic-rec-0042", "synthetic-corr-unscoped", "/fail/x"} {
+			if bytes.Contains(body, []byte(leak)) {
+				t.Fatalf("%s returns unscoped request data %q: %s", path, leak, body)
+			}
+		}
+	}
+}
+
+// A request held when the faults are cleared finishes afterwards; it must not
+// put the cleared run's data back into the ring.
+func TestClearDeletesRecordsOfRequestsInFlight(t *testing.T) {
+	p, _ := startEchoProxy(t)
+	p.install(t, testRun, "header", flt("hold", "timeout", "svc", obj{"hold": "30s"}))
+	held := make(chan struct{})
+	go func() {
+		raw(t, p.s.trafficAddr, rawGet("/svc/held", testRun))
+		close(held)
+	}()
+	eventually(t, 3*time.Second, "the request is held", func() bool { return p.triggers(t, "hold") == 1 })
+	p.clear(t)
+	<-held
+	// The handler records just after the client sees the close.
+	time.Sleep(200 * time.Millisecond)
+	if recs, _ := p.records(t, testRun, 0); len(recs) != 0 {
+		t.Fatalf("a request that finished after the clear was recorded: %+v", recs)
+	}
+}
+
+func TestLeaseExpiryDeletesRecords(t *testing.T) {
+	p, _ := startEchoProxy(t, func(s *stack) { s.leaseTimeout = "1s" })
+	p.install(t, testRun, "header", flt("f1", "http_error", "svc", obj{"status": 503}))
+	call("GET", p.url("/svc/x"), scoped(testRun), "")
+	p.recordsN(t, testRun, 1)
+	eventually(t, 3*time.Second, "lease expiry", func() bool { return p.active(t).RunID == nil })
+	if recs, _ := p.records(t, testRun, 0); len(recs) != 0 {
+		t.Fatalf("lease expiry must delete the run's records, got %+v", recs)
+	}
+}
+
+// Control may fail to clear a run and install the next one before the lease expires.
+func TestInstallingAnotherRunDeletesRecords(t *testing.T) {
+	const otherRun = "run_bbbbbbbbbbbb"
+	p, _ := startEchoProxy(t)
+	p.install(t, testRun, "header", flt("f1", "http_error", "svc", obj{"status": 503}))
+	call("GET", p.url("/svc/x"), scoped(testRun), "")
+	p.recordsN(t, testRun, 1)
+
+	p.install(t, testRun, "header", flt("f2", "http_error", "svc", obj{"status": 500}))
+	if recs, _ := p.records(t, testRun, 0); len(recs) != 1 {
+		t.Fatalf("reinstalling the same run must keep its records, got %+v", recs)
+	}
+
+	p.install(t, otherRun, "header", flt("f1", "http_error", "svc", obj{"status": 503}))
+	call("GET", p.url("/svc/y"), scoped(otherRun), "")
+	p.recordsN(t, otherRun, 1)
+	if recs, _ := p.records(t, testRun, 0); len(recs) != 0 {
+		t.Fatalf("installing another run must delete the replaced run's records, got %+v", recs)
 	}
 }
 

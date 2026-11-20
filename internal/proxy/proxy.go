@@ -85,7 +85,20 @@ func New(cfg *config.Config, log *slog.Logger) (*Proxy, error) {
 		p.routes[r.Name] = &route{name: r.Name, upstream: u}
 		names = append(names, r.Name)
 	}
+	// The engine calls onEvent under its lock, so activeRun needs no lock of its own.
+	var activeRun string
 	p.engine = NewEngine(names, cfg.LeaseTimeout, func(ev fault.Event) {
+		switch {
+		case ev.Type != "installed":
+			// Clear, lease expiry and shutdown all end the run; its records go with it.
+			p.records.purge(ev.RunID)
+			activeRun = ""
+		case activeRun != ev.RunID:
+			if activeRun != "" {
+				p.records.purge(activeRun)
+			}
+			activeRun = ev.RunID
+		}
 		if ev.Type == "lease_expired" {
 			log.Warn("lease expired: all faults cleared", "run_id", ev.RunID)
 			return
@@ -148,7 +161,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			panic(http.ErrAbortHandler)
 		}
 	}()
-	if d.rs == nil {
+	if d.rs == nil || !(d.rs.scopeAll || d.scoped) {
 		return
 	}
 	rec := fault.Record{
@@ -166,7 +179,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if d.rule != nil {
 		rec.FaultID, rec.FaultType = &d.rule.spec.ID, &d.rule.spec.Type
 	}
-	if p.records.add(d.rs.runID, rec) {
+	if p.records.addIf(func() bool { return !d.rs.isCleared() }, d.rs.runID, rec) {
 		p.warnRecordsLost(d.rs.runID)
 	}
 }
