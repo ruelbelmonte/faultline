@@ -3,10 +3,13 @@
 package control
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"sync"
@@ -64,8 +67,9 @@ type Store struct {
 	db      *sql.DB
 	dataDir string
 
-	auditMu   sync.Mutex
-	auditFile *os.File
+	auditMu    sync.Mutex
+	auditFile  *os.File
+	auditChain hash.Hash
 }
 
 func OpenStore(dataDir string) (*Store, error) {
@@ -87,12 +91,39 @@ func OpenStore(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("adding audit.source_ip: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(dataDir, "audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	s, err := openAuditFile(db, dataDir)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, dataDir: dataDir, auditFile: f}, nil
+	return s, nil
+}
+
+// openAuditFile primes the hash chain with the file's bytes, starts a fresh
+// line after a fragment left by a crash, and recovers entries SQLite lacks.
+func openAuditFile(db *sql.DB, dataDir string) (*Store, error) {
+	path := filepath.Join(dataDir, "audit.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := recoverAudit(db, readAuditFile(data)); err != nil {
+		return nil, fmt.Errorf("recovering audit entries: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	chain := sha256.New()
+	chain.Write(data)
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		if _, err := f.Write([]byte("\n")); err != nil {
+			f.Close()
+			return nil, err
+		}
+		chain.Write([]byte("\n"))
+	}
+	return &Store{db: db, dataDir: dataDir, auditFile: f, auditChain: chain}, nil
 }
 
 func (s *Store) Close() error {
@@ -235,6 +266,8 @@ type AuditEntry struct {
 	Action   string         `json:"action"`
 	RunID    string         `json:"run_id"`
 	Detail   map[string]any `json:"detail"`
+	// PrevHash is set in audit.jsonl only (D113).
+	PrevHash string `json:"prev_hash,omitempty"`
 }
 
 // Actor is who an audit entry is attributed to: "token:<name>" with the
@@ -249,22 +282,24 @@ func (s *Store) Audit(actor Actor, action, runID string, detail map[string]any) 
 		detail = map[string]any{}
 	}
 	e := AuditEntry{TS: report.At(time.Now()), Actor: actor.Name, SourceIP: actor.IP, Action: action, RunID: runID, Detail: detail}
-	detailJSON, err := json.Marshal(detail)
-	if err != nil {
-		return err
-	}
+	s.auditMu.Lock()
+	defer s.auditMu.Unlock()
+	e.PrevHash = hex.EncodeToString(s.auditChain.Sum(nil))
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	s.auditMu.Lock()
-	defer s.auditMu.Unlock()
-	if _, err := s.db.Exec(`INSERT INTO audit (ts, actor, source_ip, action, run_id, detail) VALUES (?, ?, ?, ?, ?, ?)`,
-		e.TS.Format(time.RFC3339), actor.Name, actor.IP, action, runID, string(detailJSON)); err != nil {
+	line = append(line, '\n')
+	// The chained file is the record of truth: written and synced first, so a
+	// crash before the SQLite insert is repaired from it at the next start.
+	if _, err := s.auditFile.Write(line); err != nil {
 		return err
 	}
-	_, err = s.auditFile.Write(append(line, '\n'))
-	return err
+	s.auditChain.Write(line)
+	if err := s.auditFile.Sync(); err != nil {
+		return err
+	}
+	return insertAudit(s.db, e)
 }
 
 func (s *Store) AuditLog(limit int) ([]AuditEntry, error) {

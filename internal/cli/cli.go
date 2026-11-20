@@ -38,10 +38,12 @@ Usage:
   faultline status [--url URL]
   faultline stop [--url URL]
   faultline report <run_id> --format F [--out FILE] [--url URL]
+  faultline audit verify [--config FILE]
 
 Environment:
   FAULTLINE_URL          control plane URL (default http://127.0.0.1:7700)
   FAULTLINE_TOKEN        bearer token for the control API
+  FAULTLINE_TOKENS_FILE  named control tokens for control, instead of FAULTLINE_TOKEN
   FAULTLINE_ADMIN_TOKEN  bearer token for the proxy admin API
 `
 
@@ -78,6 +80,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return e.cmdStatus(rest)
 	case "stop":
 		return e.cmdStop(rest)
+	case "audit":
+		return e.cmdAudit(rest)
 	case "report":
 		return e.cmdReport(rest)
 	case "help", "-h", "--help":

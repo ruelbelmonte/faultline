@@ -92,7 +92,7 @@ Everything lives under `data_dir`:
 | Path | Content |
 |---|---|
 | `faultline.db` | SQLite: runs (canonical document, timeline context, redacted experiment), one metrics bucket per second per run, audit entries |
-| `audit.jsonl` | The audit log again, one JSON object per line, append-only |
+| `audit.jsonl` | The audit log again, one JSON object per line, append-only and fsynced. Each line's `prev_hash` is the SHA-256 of every byte before it. It is written before SQLite, and entries that reached only this file are copied into SQLite at the next start (`faultline audit verify`, DECISIONS D113) |
 | `reports/{run_id}/` | `report.json`, `report.md`, `report.html`, `report.xml` |
 
 While a run is active, control keeps the part of each of its request records that the finding rules read (time, route, duration, fault id, Retry-After, hold time, and a salted hash in place of the correlation id) in `faultline.db`, so the evidence for findings does not have to fit in memory. Those rows are deleted as soon as the run's findings are computed, and at the next start if control was killed first. Method, path and status are not stored, and the correlation id itself never reaches the disk. The experiment is redacted before it is stored; the unredacted text exists only in the memory of the running control process.
