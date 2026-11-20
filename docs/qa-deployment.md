@@ -101,15 +101,46 @@ Not kept: request or response bodies, header values, query strings of proxied re
 
 Logs are structured (`--log-format json`). They contain run ids, route names, methods and statuses. A failed upstream call is logged as the route, the method and a class of error (`connection_refused`, `connection_reset`, `timeout`, `dns`, `tls`, `eof`, `transport` or `other`), never the error text, because Go's transport errors include the full upstream URL and its query string.
 
+## Metrics
+
+Set `FAULTLINE_METRICS_TOKEN` on both workloads to serve `GET /metrics` in the Prometheus text format: on the proxy's admin port (7702) and on the control port (7700). The token reads metrics and nothing else, so the scraper never holds the admin or a control token. Without it, `/metrics` is off. Labels are route names from `faultline.yaml` and fault types only: no paths, headers, run ids or correlation ids.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `faultline_proxy_requests_total` | counter | `route` |
+| `faultline_proxy_request_duration_seconds` | histogram, injected latency included | `route` |
+| `faultline_proxy_upstream_errors_total` | counter: upstream unreachable, answered 502 | `route` |
+| `faultline_proxy_faults_triggered_total` | counter | `type` |
+| `faultline_proxy_lease_active` | gauge, 1 while faults are installed | |
+| `faultline_proxy_lease_seconds_since_renewal` | gauge, 0 without a lease | |
+| `faultline_proxy_lease_expired_total` | counter: faults cleared because control stopped renewing | |
+| `faultline_proxy_records_dropped_total` | counter: records overwritten before control read them, so findings for that run rest on incomplete data | |
+| `faultline_control_run_status_transitions_total` | counter | `status` |
+
+```yaml
+scrape_configs:
+  - job_name: faultline-proxy
+    scheme: https            # behind your TLS terminator
+    authorization: {credentials_file: /etc/prometheus/faultline-metrics-token}
+    static_configs: [{targets: ["faultline-proxy-admin.qa.internal:443"]}]
+  - job_name: faultline-control
+    scheme: https
+    authorization: {credentials_file: /etc/prometheus/faultline-metrics-token}
+    static_configs: [{targets: ["faultline.qa.internal:443"]}]
+```
+
+Worth alerting on: `faultline_proxy_lease_expired_total` increasing (control stopped renewing mid-run), `faultline_proxy_records_dropped_total` increasing, and `faultline_proxy_upstream_errors_total` rising on a route while no lease is active, which points at the proxy or the upstream rather than an experiment.
+
 ## Checklist
 
 - [ ] The environment holds synthetic data only.
 - [ ] `environment: qa`, `control.allow_unscoped: false`, `control.allow_commands: false`, `control.allowed_hosts` set.
 - [ ] Proxy and control run as separate workloads from the same config.
-- [ ] 7702 is reachable from the control plane only; 7701 from the services under test only.
+- [ ] 7702 is reachable from the control plane only, plus Prometheus if it scrapes `/metrics`; 7701 from the services under test only.
 - [ ] `control.proxy_admin_url` is `https://` (or loopback), and `control.allow_insecure_admin` is not set.
 - [ ] 7700 is behind TLS and network restrictions.
 - [ ] Both tokens come from the secret store, are different, and are at least 32 random bytes.
+- [ ] If Prometheus scrapes `/metrics`, `FAULTLINE_METRICS_TOKEN` is a third value of its own, never the admin or a control token.
 - [ ] Each person and each pipeline has its own control token in `FAULTLINE_TOKENS_FILE`, and `control.trusted_proxies` lists the reverse proxy in front of 7700.
 - [ ] Services forward W3C baggage, or `X-Chaos-Run` and `X-Chaos-Correlation`.
 - [ ] Experiments have `abort` thresholds, and the team knows where the kill switch is.

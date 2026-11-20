@@ -33,9 +33,13 @@ func (e *env) cmdControl(args []string) int {
 	if !ok {
 		return exitUsage
 	}
+	metricsToken, ok := e.metricsToken()
+	if !ok {
+		return exitUsage
+	}
 	ctx, cancel := serveContext()
 	defer cancel()
-	if err := control.Serve(ctx, cfg, tokens, adminToken, log); err != nil && !errors.Is(err, context.Canceled) {
+	if err := control.Serve(ctx, cfg, tokens, adminToken, metricsToken, log); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(e.stderr, "faultline: %v\n", err)
 		return exitInternal
 	}
@@ -99,6 +103,9 @@ func (e *env) cmdUp(args []string) int {
 		}
 		tokens[config.EnvTokensFile] = file
 		needed = needed[1:]
+	}
+	if tok := os.Getenv(config.EnvMetricsToken); tok != "" {
+		tokens[config.EnvMetricsToken] = tok
 	}
 	for _, name := range needed {
 		if os.Getenv(name) == "" {
@@ -241,11 +248,14 @@ func waitHealthy(ctx context.Context, urls ...string) bool {
 
 // childEnv is the environment of the `up` child named name ("proxy" or
 // "control"): the parent's environment without any Faultline token, plus
-// only the tokens that child needs. The proxy needs the admin token alone;
-// control also needs the control token or the tokens file.
+// only the tokens that child needs: the admin token, the metrics token when
+// one is set, and for control the control token or the tokens file.
 func childEnv(name string, environ []string, tokens map[string]string) []string {
 	env := append(config.EnvWithoutTokens(environ), envParentWatch+"=1",
 		config.EnvAdminToken+"="+tokens[config.EnvAdminToken])
+	if tokens[config.EnvMetricsToken] != "" {
+		env = append(env, config.EnvMetricsToken+"="+tokens[config.EnvMetricsToken])
+	}
 	if name == "control" {
 		for _, k := range []string{config.EnvToken, config.EnvTokensFile} {
 			if tokens[k] != "" {

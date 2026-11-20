@@ -21,6 +21,7 @@ import (
 
 	"faultline/internal/config"
 	"faultline/internal/experiment"
+	"faultline/internal/metrics"
 	"faultline/internal/report"
 	"faultline/internal/ui"
 	"faultline/internal/yamlx"
@@ -140,6 +141,9 @@ func (c *Control) Handler() http.Handler {
 		actor := Actor{Name: "token:" + name, IP: clientIP(r, c.cfg.TrustedProxies)}
 		api.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, actor)))
 	})
+	if c.metricsToken != "" {
+		mux.Handle("GET /metrics", metrics.Handler(c.metrics.reg, c.metricsToken))
+	}
 	mux.Handle("/", ui.Handler())
 	return mux
 }

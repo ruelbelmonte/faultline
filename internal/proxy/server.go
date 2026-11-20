@@ -13,7 +13,7 @@ import (
 )
 
 // Run serves traffic and the admin API until ctx is cancelled.
-func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.Logger) error {
+func Run(ctx context.Context, cfg *config.Config, adminToken, metricsToken string, log *slog.Logger) error {
 	p, err := New(cfg, log)
 	if err != nil {
 		return err
@@ -29,7 +29,7 @@ func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.L
 	}
 
 	traffic := newTrafficServer(p)
-	admin := newAdminServer(p.Admin(adminToken))
+	admin := newAdminServer(p.Admin(adminToken, metricsToken))
 
 	stopWatch := make(chan struct{})
 	go p.engine.Watch(stopWatch)

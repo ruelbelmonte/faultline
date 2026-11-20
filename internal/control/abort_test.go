@@ -21,7 +21,7 @@ func TestAbortOfARunThatIsFinishing(t *testing.T) {
 	cfg.DataDir = t.TempDir()
 	cfg.Routes = []config.Route{{Name: "inventory", Upstream: "http://127.0.0.1:1"}}
 	const token = "unit-test-control-token-0123"
-	c, err := New(cfg, testTokens(token), "unit-test-admin-token-0123", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c, err := New(cfg, testTokens(token), "unit-test-admin-token-0123", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

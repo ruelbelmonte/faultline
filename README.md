@@ -165,6 +165,7 @@ faultline audit verify [--config FILE]
 | `FAULTLINE_TOKEN` | `control`, remote commands | Bearer token for the control API. At least 16 characters. For `control`, it is the single token named `default`. |
 | `FAULTLINE_TOKENS_FILE` | `control` | Path to a file of named control tokens, one `name:sha256hex` per line, instead of `FAULTLINE_TOKEN`. The audit log then names who did what. See [docs/qa-deployment.md](docs/qa-deployment.md#tokens). |
 | `FAULTLINE_ADMIN_TOKEN` | `proxy`, `control` | Bearer token for the proxy admin API. At least 16 characters. |
+| `FAULTLINE_METRICS_TOKEN` | `proxy`, `control`, `up` | Optional. Bearer token for `GET /metrics` on the proxy admin port and the control port; it grants nothing else. Unset, `/metrics` is off. At least 16 characters. See [docs/qa-deployment.md](docs/qa-deployment.md#metrics). |
 | `FAULTLINE_URL` | remote commands | Control plane URL. Default `http://127.0.0.1:7700`. `--url` overrides it. |
 
 Tokens never go in `faultline.yaml`.

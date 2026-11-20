@@ -22,10 +22,11 @@ import (
 )
 
 const (
-	EnvToken      = "FAULTLINE_TOKEN"
-	EnvTokensFile = "FAULTLINE_TOKENS_FILE"
-	EnvAdminToken = "FAULTLINE_ADMIN_TOKEN"
-	MinTokenLen   = 16
+	EnvToken        = "FAULTLINE_TOKEN"
+	EnvTokensFile   = "FAULTLINE_TOKENS_FILE"
+	EnvAdminToken   = "FAULTLINE_ADMIN_TOKEN"
+	EnvMetricsToken = "FAULTLINE_METRICS_TOKEN"
+	MinTokenLen     = 16
 )
 
 var NameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -471,4 +472,12 @@ func Token(env string) (string, error) {
 		return "", fmt.Errorf("%s must be at least %d characters", env, MinTokenLen)
 	}
 	return v, nil
+}
+
+// OptionalToken is Token for a variable that may be unset, which gives "".
+func OptionalToken(env string) (string, error) {
+	if os.Getenv(env) == "" {
+		return "", nil
+	}
+	return Token(env)
 }

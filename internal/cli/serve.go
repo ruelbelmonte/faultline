@@ -99,11 +99,25 @@ func (e *env) cmdProxy(args []string) int {
 	if !ok {
 		return exitUsage
 	}
+	metricsToken, ok := e.metricsToken()
+	if !ok {
+		return exitUsage
+	}
 	ctx, cancel := serveContext()
 	defer cancel()
-	if err := proxy.Run(ctx, cfg, token, log); err != nil && !errors.Is(err, context.Canceled) {
+	if err := proxy.Run(ctx, cfg, token, metricsToken, log); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(e.stderr, "faultline: %v\n", err)
 		return exitInternal
 	}
 	return exitOK
+}
+
+// metricsToken reads the optional FAULTLINE_METRICS_TOKEN; unset turns /metrics off.
+func (e *env) metricsToken() (string, bool) {
+	tok, err := config.OptionalToken(config.EnvMetricsToken)
+	if err != nil {
+		fmt.Fprintf(e.stderr, "faultline: %v\n", err)
+		return "", false
+	}
+	return tok, true
 }

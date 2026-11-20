@@ -44,6 +44,7 @@ type Proxy struct {
 	tlsConfig *tls.Config
 	log       *slog.Logger
 
+	metrics    *promMetrics
 	lossWarned atomic.Pointer[string]
 }
 
@@ -102,11 +103,13 @@ func New(cfg *config.Config, log *slog.Logger) (*Proxy, error) {
 			activeRun = ev.RunID
 		}
 		if ev.Type == "lease_expired" {
+			p.metrics.leaseExpired.Inc()
 			log.Warn("lease expired: all faults cleared", "run_id", ev.RunID)
 			return
 		}
 		log.Info("faults "+ev.Type, "run_id", ev.RunID)
 	})
+	p.metrics = newMetrics(names, p.engine)
 	return p, nil
 }
 
@@ -115,6 +118,7 @@ type outcome struct {
 	status       int
 	retryAfter   *int
 	clientHeldMs *float64
+	upstreamErr  bool
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +174,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			panic(http.ErrAbortHandler)
 		}
 	}()
+	faultType := ""
+	if d.rule != nil {
+		faultType = d.rule.spec.Type
+	}
+	p.metrics.observe(name, time.Since(begin), out, faultType)
 	if d.rs == nil || !(d.rs.scopeAll || d.scoped) {
 		return
 	}
@@ -189,6 +198,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rec.FaultID, rec.FaultType = &d.rule.spec.ID, &d.rule.spec.Type
 	}
 	if p.records.addIf(func() bool { return !d.rs.isCleared() }, d.rs.runID, rec) {
+		p.metrics.recordsDropped.Inc()
 		p.warnRecordsLost(d.rs.runID)
 	}
 }
@@ -468,7 +478,7 @@ func (p *Proxy) upstreamError(w http.ResponseWriter, req *http.Request, rt *rout
 	p.setFaultHeader(w.Header(), r)
 	w.WriteHeader(http.StatusBadGateway)
 	io.WriteString(w, `{"error":"upstream_unreachable"}`)
-	return outcome{status: http.StatusBadGateway}
+	return outcome{status: http.StatusBadGateway, upstreamErr: true}
 }
 
 // sleep waits for d. It returns false when cut short by the client going

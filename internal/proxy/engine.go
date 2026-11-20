@@ -337,3 +337,14 @@ func (e *Engine) Stats() fault.Stats {
 	}
 	return s
 }
+
+// LeaseState reports whether a rule set is installed and how long ago its
+// lease was installed or last renewed.
+func (e *Engine) LeaseState() (active bool, sinceRenewal time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.active.Load() == nil {
+		return false, 0
+	}
+	return true, time.Since(e.lastRenew)
+}

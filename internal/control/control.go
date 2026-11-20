@@ -60,18 +60,21 @@ type Control struct {
 	proxy  *ProxyClient
 	log    *slog.Logger
 	tokens []config.NamedToken
+	// metricsToken guards GET /metrics; empty leaves it off.
+	metricsToken string
+	metrics      *promMetrics
 
 	mu     sync.Mutex
 	active *Run
 }
 
-func New(cfg *config.Config, tokens []config.NamedToken, adminToken string, log *slog.Logger) (*Control, error) {
+func New(cfg *config.Config, tokens []config.NamedToken, adminToken, metricsToken string, log *slog.Logger) (*Control, error) {
 	store, err := OpenStore(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
 	return &Control{
-		cfg: cfg, store: store, log: log, tokens: tokens,
+		cfg: cfg, store: store, log: log, tokens: tokens, metricsToken: metricsToken, metrics: newPromMetrics(),
 		proxy: NewProxyClient(cfg.ProxyAdminURL, adminToken),
 	}, nil
 }
@@ -211,8 +214,8 @@ func (c *Control) recoverUnfinished() error {
 }
 
 // Serve runs the control plane until ctx is cancelled.
-func Serve(ctx context.Context, cfg *config.Config, tokens []config.NamedToken, adminToken string, log *slog.Logger) error {
-	c, err := New(cfg, tokens, adminToken, log)
+func Serve(ctx context.Context, cfg *config.Config, tokens []config.NamedToken, adminToken, metricsToken string, log *slog.Logger) error {
+	c, err := New(cfg, tokens, adminToken, metricsToken, log)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"faultline/internal/fault"
+	"faultline/internal/metrics"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -23,8 +24,8 @@ func BearerOK(r *http.Request, token string) bool {
 	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }
 
-// Admin returns the admin API handler.
-func (p *Proxy) Admin(token string) http.Handler {
+// Admin returns the admin API handler. An empty metricsToken leaves /metrics off.
+func (p *Proxy) Admin(token, metricsToken string) http.Handler {
 	mux := http.NewServeMux()
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +101,10 @@ func (p *Proxy) Admin(token string) http.Handler {
 	mux.HandleFunc("GET /admin/v1/stats", auth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, p.engine.Stats())
 	}))
+
+	if metricsToken != "" {
+		mux.Handle("GET /metrics", metrics.Handler(p.metrics.reg, metricsToken))
+	}
 
 	// Unknown admin paths must not reveal anything without a token either.
 	mux.HandleFunc("/", auth(func(w http.ResponseWriter, r *http.Request) {
