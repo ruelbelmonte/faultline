@@ -18,6 +18,8 @@ Primary targets, in order:
 2. CI (headless, exit codes, JUnit).
 3. Shared QA environments (remote control, auth, header-scoped faults, audit log).
 
+This order is superseded by D119 (2026-11-20): shared QA environments are now the primary target.
+
 Production is explicitly out of scope and is actively guarded against.
 
 ## 2. Goals and non-goals
