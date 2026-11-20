@@ -676,7 +676,7 @@ Started 2026-11-15, after Goal 1 was merged to `master` (cdda636): issues #28, #
 |---|---|---|---|
 | #28 run-over-run comparison | #59 | Done | D115, D116 |
 | #29 W3C baggage scoping | #60 | Done | D117 |
-| #24 release pipeline | #61 | Done, except publishing v0.1.0, which needs the owner (steps below) | D118 |
+| #24 release pipeline | #61 | Done; v0.1.0 published 2026-11-20 | D118 |
 
 ## Acceptance criteria, as written in each issue
 
@@ -692,7 +692,7 @@ Started 2026-11-15, after Goal 1 was merged to `master` (cdda636): issues #28, #
 - [x] `docs/faults.md` and the README "Scoping across hops" section updated.
 
 **#24**
-- [ ] Pushing `v0.1.0` produces signed binaries, images, an SBOM and provenance, and `cosign verify` succeeds. Not done: pushing a tag publishes, which the goal reserves for the owner. The workflow's dry run (pull request trigger) builds everything the release would; the steps to publish are below.
+- [x] Pushing `v0.1.0` produces signed binaries, images, an SBOM and provenance, and `cosign verify` succeeds: see "v0.1.0 published" below.
 - [x] The README quickstart works without a Go toolchain: a release-download path sits beside build-from-source, to be tried once the first release exists.
 - [x] Also from the goal: base images pinned by digest, version from the tag, six platforms, checksums, GHCR images, SBOM, keyless cosign, provenance, dry run that skips publishing.
 
@@ -706,7 +706,7 @@ Started 2026-11-15, after Goal 1 was merged to `master` (cdda636): issues #28, #
 
 ## Not done, and why
 
-- **Publishing v0.1.0.** Reserved for the owner by the goal. Steps below and in `docs/releasing.md`.
+- **Publishing v0.1.0.** Reserved for the owner by the goal; the owner had Claude push the tag on 2026-11-20 (see "v0.1.0 published" below).
 - **Manual `workflow_dispatch` dry run.** Not possible before the workflow is on `master`; the pull request trigger runs the same dry run instead.
 
 ## Steps to cut v0.1.0
@@ -735,5 +735,14 @@ Started 2026-11-15, after Goal 1 was merged to `master` (cdda636): issues #28, #
 
 - **Report schema now has 16 keys (D115).** Any consumer, including the external acceptance suite, that checks for exactly 15 needs updating.
 - **The demo forwards `baggage` by default now (D117).** Harmless for the demo, but anyone copying its client code should know.
-- **Release depends on GHCR package visibility and naming.** First publish creates private packages under the owner's account; step 5 above.
+- **Release depends on GHCR package visibility and naming.** Expected private packages on first publish; v0.1.0's came out public.
 - **Dependabot's major-version PRs (#38 to #42) touch the same files** (`actions/*` pins, the node base image). Merge #59 to #61 first, then rebase or let Dependabot recreate them, so the digest pins and the new workflow are updated together.
+
+## v0.1.0 published (2026-11-20)
+
+- Before tagging: the `workflow_dispatch` dry run on `master` (run 44688233841) and `master` CI on b2f466b were green.
+- `v0.1.0` tagged on b2f466b. Release run 44692138005: `plan`, `binaries`, both `images` and `release` green; 14 assets.
+- Checked from a clean directory: `sha256sum -c checksums.txt` OK for the Linux and Windows amd64 binaries, `faultline version` prints `faultline 0.1.0`, `gh attestation verify` passes for the Windows binary and `oci://ghcr.io/ruelbelmonte/faultline:0.1.0`, and `cosign verify` (v3.0.6) passes for both images. cosign v2.4.1 reports "no signatures found", because v3 stores the signature in the new bundle format; `docs/releasing.md` now says to use cosign 3.x.
+- Release notes gained upgrade notes (D101, D110, D115 to D117, D120) and the verification commands.
+- Both GHCR packages are public.
+- README quickstart, release path, run as written in an empty directory with no Go on `PATH` (Windows amd64, Git Bash): checksums OK, `faultline run` verdict `passed`, exit 0, findings `retry_without_backoff` and `retry_after_ignored`. This meets the #24 criterion "the README quickstart works without a Go toolchain".
