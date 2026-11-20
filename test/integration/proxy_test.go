@@ -174,6 +174,13 @@ func TestProxyRejectsDotSegments(t *testing.T) {
 		"/svc/a%ef%b9%a8..%ef%b9%a8internal",
 		"/svc/a%c1%9c..%c1%9cinternal",
 		"/svc/a%e2%88%95..%e2%88%95internal",
+		"/svc/..%3Fx/internal",
+		"/svc/..%23x/internal",
+		"/svc/..%00x/internal",
+		"/svc/..%0ax/internal",
+		"/svc/%f8%80%80%80%ae%f8%80%80%80%ae/internal",
+		"/svc/%fc%80%80%80%80%ae./internal",
+		"/svc/a%fc%80%80%80%80%af..%fc%80%80%80%80%afinternal",
 		"/svc/%2525252525252e%2525252525252e/internal",
 	} {
 		got.Store(nil)
