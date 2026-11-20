@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"faultline/internal/config"
 	"faultline/internal/fault"
@@ -135,6 +137,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if decoded, err := url.PathUnescape(path); err == nil {
 		path = decoded
 	}
+	if decoded, ok := decodeFully(rest); !ok || hasDotSegment(decoded) {
+		w.Header().Set(headerFaultlne, "invalid-path")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":"invalid_path"}`)
+		return
+	}
 
 	d := p.engine.DecideCall(name, r.Method, path, r.Header.Get(p.cfg.ScopeHeader), begin, sync.OnceValue(func() *mcpCall { return readToolCall(r) }))
 	var out outcome
@@ -181,6 +190,62 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.records.addIf(func() bool { return !d.rs.isCleared() }, d.rs.runID, rec) {
 		p.warnRecordsLost(d.rs.runID)
 	}
+}
+
+// decodeFully decodes valid %XX and IIS-style %uXXXX escapes until nothing
+// changes, as the most lenient upstream decoding repeatedly would. It fails
+// after 4 layers.
+func decodeFully(s string) (string, bool) {
+	for range 5 {
+		var b strings.Builder
+		for i := 0; i < len(s); i++ {
+			if s[i] == '%' && i+5 < len(s) && (s[i+1] == 'u' || s[i+1] == 'U') {
+				if v, err := hex.DecodeString(s[i+2 : i+6]); err == nil {
+					b.WriteRune(rune(v[0])<<8 | rune(v[1]))
+					i += 5
+					continue
+				}
+			}
+			if s[i] == '%' && i+2 < len(s) {
+				if v, err := hex.DecodeString(s[i+1 : i+3]); err == nil {
+					b.WriteByte(v[0])
+					i += 2
+					continue
+				}
+			}
+			b.WriteByte(s[i])
+		}
+		if b.String() == s {
+			return s, true
+		}
+		s = b.String()
+	}
+	return "", false
+}
+
+// lookalikes maps every code point whose NFKC form is only full stops or a
+// slash or backslash, the overlong UTF-8 forms of those, and U+2215 (a slash
+// look-alike without a decomposition) to what some server reads them as.
+var lookalikes = strings.NewReplacer(
+	"․", ".", "‥", "..", "…", "...", "︙", "...", "︰", "..", "﹒", ".", "．", ".",
+	"／", "/", "∕", "/", "＼", `\`, "﹨", `\`,
+	"\xc0\xae", ".", "\xe0\x80\xae", ".", "\xf0\x80\x80\xae", ".",
+	"\xc0\xaf", "/", "\xe0\x80\xaf", "/", "\xf0\x80\x80\xaf", "/",
+	"\xc1\x9c", `\`, "\xe0\x81\x9c", `\`, "\xf0\x80\x81\x9c", `\`,
+)
+
+// hasDotSegment reports whether a decoded path has a segment that some server
+// reads as "." or "..": separated by "\" too, with ";params", look-alikes,
+// and trailing dots, spaces and control bytes accounted for (D108).
+func hasDotSegment(path string) bool {
+	for _, seg := range strings.FieldsFunc(lookalikes.Replace(path), func(c rune) bool { return c == '/' || c == '\\' }) {
+		seg, _, _ = strings.Cut(seg, ";")
+		trimmed := strings.TrimRightFunc(seg, func(c rune) bool { return c == '.' || c <= ' ' || c == 0x7f || unicode.IsSpace(c) })
+		if strings.HasPrefix(seg, ".") && trimmed == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // warnRecordsLost logs, once per run, that the record ring wrapped before the
