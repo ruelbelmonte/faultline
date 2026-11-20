@@ -48,6 +48,15 @@ Faultline does not terminate TLS itself. Calls from the proxy to an `https://` u
 - `FAULTLINE_TOKEN` authenticates the control API and the dashboard. `FAULTLINE_ADMIN_TOKEN` authenticates the proxy admin API and is needed by both workloads.
 - Use two different random values of at least 32 bytes (`openssl rand -hex 32`). Both processes refuse to start with a missing token or one shorter than 16 characters.
 - Inject them from your secret store as environment variables. They never go in `faultline.yaml`, and Faultline never logs them.
+- Holding a control token allows all of the following, and every token allows the same:
+  - Start a run, which injects faults into every request that carries its run id on any configured route. With `control.allow_unscoped: true`, that becomes every request on the route, from everyone.
+  - Abort runs and press the kill switch.
+  - Make the control plane send requests with any method, headers and body to the hosts that `control.allowed_hosts` admits (any host, if it is empty).
+  - Read experiment files in `experiments_dir`, redacted, and save new or changed ones, except over a file that holds secrets.
+  - Read every run, report and audit entry.
+  - With `control.allow_commands: true`, run shell commands on the control host.
+
+  Treat each token like an admin password for the shared environment. The admin token is stronger still: it installs faults on the proxy directly, without control's checks such as `allow_unscoped` and `max_experiment_duration`, so only the control plane should ever hold it.
 - Give each person and each CI pipeline its own control token, so the audit log records who did what. Put one `name:sha256hex` line per token in a file and point `FAULTLINE_TOKENS_FILE` at it instead of setting `FAULTLINE_TOKEN`. Control refuses to start with both set. Names use lowercase letters, digits and hyphens. Each person keeps their own token value in their own `FAULTLINE_TOKEN` for the CLI and the dashboard; only the hash goes in the file:
 
   ```sh
