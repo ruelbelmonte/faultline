@@ -47,11 +47,20 @@ func newRing(size int) *ring {
 // add stores a record. It reports whether doing so overwrote a record that
 // no reader had been given yet.
 func (r *ring) add(runID string, rec fault.Record) (lostUnread bool) {
+	return r.addIf(func() bool { return true }, runID, rec)
+}
+
+// addIf stores a record only if open still reports true under the ring's
+// lock, so a record cannot slip in after purge removed its run.
+func (r *ring) addIf(open func() bool, runID string, rec fault.Record) (lostUnread bool) {
 	rec.Path = clip(rec.Path, maxRecordPath)
 	rec.Correlation = clip(rec.Correlation, maxRecordCorrelation)
 	rec.Method = clip(rec.Method, maxRecordMethod)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !open() {
+		return false
+	}
 	r.seq++
 	rec.Seq = r.seq
 	e := entry{rec: rec, runID: runID}
@@ -65,8 +74,20 @@ func (r *ring) add(runID string, rec fault.Record) (lostUnread bool) {
 	return lostUnread
 }
 
-// since returns records with seq > since for a run (any run when runID is
-// empty). Next is the highest seq examined, to be passed back as since.
+// purge drops a run's records. Their slots keep only the sequence number, so
+// paging and loss detection carry on unchanged.
+func (r *ring) purge(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, e := range r.buf {
+		if e.runID == runID {
+			r.buf[i] = entry{rec: fault.Record{Seq: e.rec.Seq}}
+		}
+	}
+}
+
+// since returns a run's records with seq > since. Next is the highest seq
+// examined, to be passed back as since.
 func (r *ring) since(runID string, since int64) fault.RecordPage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -76,7 +97,7 @@ func (r *ring) since(runID string, since int64) fault.RecordPage {
 	for s := from; s <= r.seq && len(page.Records) < fault.MaxRecordsPage; s++ {
 		e := r.buf[(r.start+int(s-oldest))%len(r.buf)]
 		page.Next = s
-		if runID == "" || e.runID == runID {
+		if e.runID == runID {
 			page.Records = append(page.Records, e.rec)
 		}
 	}

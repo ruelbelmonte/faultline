@@ -518,8 +518,9 @@ injection:
 		r.consecOK[name] = 0
 	}
 	r.mu.Unlock()
-	r.clearProxy()
+	// Clearing deletes the run's records on the proxy (D107).
 	r.collect()
+	r.clearProxy()
 	r.setStatus(report.StatusRecovering)
 	r.awaitRecovery(now)
 	return false

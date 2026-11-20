@@ -1003,7 +1003,7 @@ faults:
 		resp.Body.Close()
 		check("API "+path, body)
 	}
-	for _, path := range []string{"/admin/v1/records", "/admin/v1/stats", "/admin/v1/faults/active"} {
+	for _, path := range []string{"/admin/v1/records?run_id=" + id, "/admin/v1/records?run_id=" + cmdID, "/admin/v1/stats", "/admin/v1/faults/active"} {
 		req, _ := http.NewRequest("GET", f.proxy.admin(path), nil)
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		resp, err := client.Do(req)

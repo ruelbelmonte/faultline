@@ -80,6 +80,11 @@ func (p *Proxy) Admin(token string) http.Handler {
 	}))
 
 	mux.HandleFunc("GET /admin/v1/records", auth(func(w http.ResponseWriter, r *http.Request) {
+		runID := r.URL.Query().Get("run_id")
+		if runID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_run_id"})
+			return
+		}
 		var since int64
 		if v := r.URL.Query().Get("since"); v != "" {
 			n, err := strconv.ParseInt(v, 10, 64)
@@ -89,7 +94,7 @@ func (p *Proxy) Admin(token string) http.Handler {
 			}
 			since = n
 		}
-		writeJSON(w, http.StatusOK, p.records.since(r.URL.Query().Get("run_id"), since))
+		writeJSON(w, http.StatusOK, p.records.since(runID, since))
 	}))
 
 	mux.HandleFunc("GET /admin/v1/stats", auth(func(w http.ResponseWriter, r *http.Request) {

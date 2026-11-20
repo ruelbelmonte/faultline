@@ -103,20 +103,57 @@ func TestRingWrapsAndPages(t *testing.T) {
 		}
 		r.add(run, fault.Record{Status: i})
 	}
-	page := r.since("", 0)
-	if len(page.Records) != 10 || page.Records[0].Seq != 16 || page.Next != 25 {
-		t.Fatalf("expected the newest 10 records (seq 16..25), got %d starting at %d, next %d", len(page.Records), page.Records[0].Seq, page.Next)
+	page := r.since("a", 0)
+	if len(page.Records) != 5 || page.Records[0].Seq != 17 || page.Next != 25 {
+		t.Fatalf("expected run a's records among the newest 10 (seq 17..25), got %+v", page)
 	}
 	for i, rec := range page.Records {
-		if rec.Seq != int64(16+i) || rec.Status != 15+i {
+		if rec.Seq != int64(17+2*i) || rec.Status != 16+2*i {
 			t.Fatalf("record %d out of order: %+v", i, rec)
 		}
 	}
 	if page = r.since("b", 20); len(page.Records) != 2 || page.Records[0].Seq != 22 || page.Next != 25 {
 		t.Fatalf("filter by run: %+v", page)
 	}
-	if page = r.since("", 25); len(page.Records) != 0 || page.Next != 25 {
+	if page = r.since("a", 25); len(page.Records) != 0 || page.Next != 25 {
 		t.Fatalf("nothing newer: %+v", page)
+	}
+}
+
+func TestRingPurgeRemovesOnlyThatRun(t *testing.T) {
+	r := newRing(10)
+	for i := 0; i < 15; i++ {
+		run := "a"
+		if i%3 == 0 {
+			run = "b"
+		}
+		r.add(run, fault.Record{Path: "/synthetic/" + run})
+	}
+	r.purge("a")
+	if page := r.since("a", 0); len(page.Records) != 0 || page.Next != 15 {
+		t.Fatalf("purged run still readable: %+v", page)
+	}
+	if page := r.since("b", 0); len(page.Records) != 3 || page.Records[0].Seq != 7 || page.Records[2].Seq != 13 {
+		t.Fatalf("other run's records must survive the purge: %+v", page)
+	}
+	for _, e := range r.buf {
+		if e.runID == "a" || e.rec.Path == "/synthetic/a" {
+			t.Fatalf("purged entry still in memory: %+v", e)
+		}
+	}
+	r.add("a", fault.Record{})
+	if page := r.since("a", 0); len(page.Records) != 1 || page.Records[0].Seq != 16 {
+		t.Fatalf("sequence numbers continue after a purge: %+v", page)
+	}
+}
+
+func TestRingAddSkipsClosedRun(t *testing.T) {
+	r := newRing(10)
+	if r.addIf(func() bool { return false }, "a", fault.Record{}) {
+		t.Fatal("a skipped record cannot overwrite anything")
+	}
+	if page := r.since("a", 0); len(page.Records) != 0 || page.Next != 0 {
+		t.Fatalf("a record of a closed run was stored: %+v", page)
 	}
 }
 
