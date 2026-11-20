@@ -46,6 +46,9 @@ type Config struct {
 	// anyone holding the control token can run shell commands on the
 	// control host.
 	AllowCommands bool
+	// AllowInsecureAdmin permits an http:// proxy_admin_url to a host that is
+	// not loopback, which sends the admin token in clear text.
+	AllowInsecureAdmin bool
 	// AllowedHosts restricts the hosts that probe and traffic URLs may name
 	// (path.Match patterns on host or host:port). Empty allows any host
 	// except link-local and metadata addresses.
@@ -190,6 +193,12 @@ func Parse(data []byte) (*Config, error) {
 		if v, ok := m.Bool("allow_commands"); ok {
 			c.AllowCommands = v
 		}
+		if v, ok := m.Bool("allow_insecure_admin"); ok {
+			c.AllowInsecureAdmin = v
+		}
+		if u, err := url.Parse(c.ProxyAdminURL); err == nil && u.Scheme == "http" && !isLoopback(u.Hostname()) && !c.AllowInsecureAdmin {
+			errs.Add(m.Path("proxy_admin_url"), "must be https unless the host is loopback, because the admin token would cross the network in clear text; set control.allow_insecure_admin: true to accept that")
+		}
 		for _, it := range m.Seq("allowed_hosts") {
 			if v, ok := it.Str(); ok {
 				v = strings.TrimSpace(v)
@@ -306,6 +315,13 @@ func httpURL(errs *yamlx.Errors, path, v string) string {
 		errs.Add(path, "must be an http or https URL")
 	}
 	return v
+}
+
+func isLoopback(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return strings.EqualFold(host, "localhost")
 }
 
 var headerRE = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]+$`)

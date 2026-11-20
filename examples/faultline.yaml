@@ -16,6 +16,8 @@ proxy:
 control:
   listen: 0.0.0.0:7700
   proxy_admin_url: http://proxy:7702
+  # The compose network is private to this demo. Outside it, put TLS in front of 7702 and use https.
+  allow_insecure_admin: true
   max_experiment_duration: 15m
   allow_unscoped: false
   allow_commands: false

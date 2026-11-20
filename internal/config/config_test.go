@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,41 @@ func TestAllowCommands(t *testing.T) {
 	}
 	if _, err := Parse([]byte("version: 1\ncontrol:\n  allow_commands: yes-please\n")); err == nil {
 		t.Fatal("a non-boolean allow_commands must be rejected")
+	}
+}
+
+// Issue #16: the admin token must not cross the network in clear text by default.
+func TestProxyAdminURLNeedsTLSOffLoopback(t *testing.T) {
+	cfg := func(url, extra string) string {
+		return "version: 1\ncontrol:\n  proxy_admin_url: " + url + "\n" + extra
+	}
+	for _, url := range []string{"http://127.0.0.1:7702", "http://127.8.9.10:7702", "http://localhost:7702", "http://LOCALHOST:7702", "http://[::1]:7702", "https://proxy.qa.internal:7702", "https://10.0.0.5"} {
+		if _, err := Parse([]byte(cfg(url, ""))); err != nil {
+			t.Errorf("%s must be accepted: %v", url, err)
+		}
+	}
+	for _, url := range []string{"http://proxy.qa.internal:7702", "http://10.0.0.5:7702", "http://[fd00::5]:7702", "http://localhost.evil.example:7702", "http://0.0.0.0:7702"} {
+		_, err := Parse([]byte(cfg(url, "")))
+		if err == nil || !strings.Contains(err.Error(), "control.proxy_admin_url") || !strings.Contains(err.Error(), "allow_insecure_admin") {
+			t.Errorf("%s must be rejected, naming the key and the override: %v", url, err)
+		}
+		c, err := Parse([]byte(cfg(url, "  allow_insecure_admin: true\n")))
+		if err != nil || !c.AllowInsecureAdmin {
+			t.Errorf("%s must be accepted with allow_insecure_admin: true: %v", url, err)
+		}
+	}
+	if c, _ := Parse([]byte("version: 1\n")); c.AllowInsecureAdmin {
+		t.Fatal("control.allow_insecure_admin must default to false")
+	}
+}
+
+func TestExampleConfigParses(t *testing.T) {
+	data, err := os.ReadFile("../../examples/faultline.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(data); err != nil {
+		t.Fatalf("examples/faultline.yaml, used by docker-compose, must stay valid: %v", err)
 	}
 }
 
