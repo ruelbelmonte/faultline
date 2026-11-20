@@ -54,7 +54,7 @@ func TestCollectCountsOnlyTheInjectionPhase(t *testing.T) {
 	cfg.DataDir = t.TempDir()
 	cfg.ProxyAdminURL = proxy.URL
 	cfg.Routes = []config.Route{{Name: "inventory", Upstream: "http://127.0.0.1:1"}}
-	c, err := New(cfg, testTokens("unit-test-control-token-0123"), "unit-test-admin-token-0123", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c, err := New(cfg, testTokens("unit-test-control-token-0123"), "unit-test-admin-token-0123", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

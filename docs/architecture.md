@@ -64,6 +64,7 @@ Because 1 compares absolute times set by control against the proxy's clock, the 
 | GET | `/admin/v1/faults/active` | `{run_id, lease_id, faults:[{id, type, route, start_at, end_at, triggers}]}` or `{run_id:null, faults:[]}` |
 | GET | `/admin/v1/records?run_id=&since=` | `{records, next}`; the run's records with `seq > since`, at most 5000 per call. `run_id` is required: 400 `{"error":"missing_run_id"}` without it |
 | GET | `/admin/v1/stats` | `{run_id, active, routes, faults, events}` |
+| GET | `/metrics` | Prometheus text format, with `Authorization: Bearer $FAULTLINE_METRICS_TOKEN` instead of the admin token. Off unless that variable is set. See [qa-deployment.md](qa-deployment.md#metrics) |
 
 ## Control plane
 

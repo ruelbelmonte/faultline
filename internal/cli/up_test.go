@@ -49,3 +49,21 @@ func TestUpChildEnvTokensFile(t *testing.T) {
 		t.Fatalf("the proxy child does not need the tokens file:\n%s", proxy)
 	}
 }
+
+// Issue #31: both children get the metrics token when one is set, and neither
+// gets one otherwise.
+func TestUpChildEnvMetricsToken(t *testing.T) {
+	parent := []string{config.EnvMetricsToken + "=inherited-metrics-0123456789"}
+	tokens := map[string]string{config.EnvToken: "control-token-0123456789", config.EnvAdminToken: "admin-token-0123456789"}
+	for _, name := range []string{"proxy", "control"} {
+		if env := strings.Join(childEnv(name, parent, tokens), "\n"); strings.Contains(env, config.EnvMetricsToken) {
+			t.Fatalf("%s must not get a metrics token that up was not given:\n%s", name, env)
+		}
+	}
+	tokens[config.EnvMetricsToken] = "metrics-token-0123456789"
+	for _, name := range []string{"proxy", "control"} {
+		if env := strings.Join(childEnv(name, parent, tokens), "\n"); !strings.Contains(env, config.EnvMetricsToken+"=metrics-token-0123456789") {
+			t.Fatalf("%s needs the metrics token:\n%s", name, env)
+		}
+	}
+}

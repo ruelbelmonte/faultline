@@ -205,6 +205,7 @@ func (r *Run) setStatus(status string) {
 	r.mu.Unlock()
 	r.persist()
 	r.publish("status", statusEvent{r.id, status, nil, nil})
+	r.c.metrics.transitions.WithLabelValues(status).Inc()
 	r.c.log.Info("run status", "run_id", r.id, "status", status)
 }
 
@@ -703,6 +704,7 @@ func (r *Run) finalize(precheckFailed bool) {
 		r.meta.Markers = append(r.meta.Markers, report.Marker{Type: "abort", T: end, Detail: cause.reason})
 	}
 	final := statusEvent{r.id, r.doc.Status, r.doc.Verdict, r.doc.Reason}
+	r.c.metrics.transitions.WithLabelValues(r.doc.Status).Inc()
 	r.mu.Unlock()
 
 	r.compare()
