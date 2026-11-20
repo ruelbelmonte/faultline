@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -124,6 +125,79 @@ func TestProxyRouting(t *testing.T) {
 			t.Fatalf("expected 502 upstream-error, got %d %q", res.status, res.header.Get("X-Faultline"))
 		}
 	})
+}
+
+// Issue #19: a dot segment could take a request outside the upstream's base path.
+func TestProxyRejectsDotSegments(t *testing.T) {
+	var got atomic.Pointer[string]
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uri := r.RequestURI
+		got.Store(&uri)
+	}))
+	t.Cleanup(up.Close)
+	s := newStack(t, map[string]string{"svc": up.URL + "/api/v2"})
+	s.startProxy(t)
+
+	for _, path := range []string{
+		"/svc/../../internal",
+		"/svc/a/../../internal",
+		"/svc/..",
+		"/svc/./x",
+		"/svc/%2e%2e/%2E%2E/internal",
+		"/svc/.%2e/internal",
+		"/svc/a/..%2f..%2finternal",
+		"/svc/..%5cinternal",
+		`/svc/..\internal`,
+		"/svc/%252e%252e/internal",
+		"/svc/%25252e%25252e/internal",
+		"/svc/..;x=1/internal",
+		"/svc/...",
+		"/svc/..%20/internal",
+		"/svc/%252e%252e/%25zz/internal",
+		"/svc/..%00/internal",
+		"/svc/..%09/internal",
+		"/svc/%ef%bc%8e%ef%bc%8e/internal",
+		"/svc/%e2%80%a4%e2%80%a4/internal",
+		"/svc/%c0%ae%c0%ae/internal",
+		"/svc/%e0%80%ae%e0%80%ae/internal",
+		"/svc/%e2%80%a5/internal",
+		"/svc/%e2%80%a6/internal",
+		"/svc/..%e3%80%80/internal",
+		"/svc/%25u002e%25u002e/internal",
+		"/svc/%25U002E./internal",
+		"/svc/%ef%b8%b0/internal",
+		"/svc/%ef%b8%99/internal",
+		"/svc/a%c0%af..%c0%afinternal",
+		"/svc/a%e0%80%af..%e0%80%afinternal",
+		"/svc/a%ef%bc%8f..%ef%bc%8finternal",
+		"/svc/a%ef%bc%bc..%ef%bc%bcinternal",
+		"/svc/a%ef%b9%a8..%ef%b9%a8internal",
+		"/svc/a%c1%9c..%c1%9cinternal",
+		"/svc/a%e2%88%95..%e2%88%95internal",
+		"/svc/%2525252525252e%2525252525252e/internal",
+	} {
+		got.Store(nil)
+		data, _, err := raw(t, s.trafficAddr, "GET "+path+" HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if !bytes.HasPrefix(data, []byte("HTTP/1.1 400")) || !bytes.Contains(data, []byte("X-Faultline: invalid-path")) || !bytes.HasSuffix(data, []byte(`{"error":"invalid_path"}`)) {
+			t.Errorf("%s: expected 400 invalid_path, got %q", path, data)
+		}
+		if u := got.Load(); u != nil {
+			t.Errorf("%s: reached the upstream as %s", path, *u)
+		}
+	}
+
+	// Dots inside a segment are ordinary names and pass through byte for byte.
+	const ok = "/a..b/.well-known/x.y/..a/c%2Fd/%20/;v=1/50%25"
+	data, _, err := raw(t, s.trafficAddr, "GET /svc"+ok+" HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+	if err != nil || !bytes.HasPrefix(data, []byte("HTTP/1.1 200")) {
+		t.Fatalf("expected 200, got %q (%v)", data, err)
+	}
+	if u := got.Load(); u == nil || *u != "/api/v2"+ok {
+		t.Fatalf("expected the upstream to receive /api/v2%s, got %v", ok, u)
+	}
 }
 
 func TestProxyChainThroughRealProxy(t *testing.T) {
