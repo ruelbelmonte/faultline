@@ -229,17 +229,19 @@ func decodeFully(s string) (string, bool) {
 var lookalikes = strings.NewReplacer(
 	"․", ".", "‥", "..", "…", "...", "︙", "...", "︰", "..", "﹒", ".", "．", ".",
 	"／", "/", "∕", "/", "＼", `\`, "﹨", `\`,
-	"\xc0\xae", ".", "\xe0\x80\xae", ".", "\xf0\x80\x80\xae", ".",
-	"\xc0\xaf", "/", "\xe0\x80\xaf", "/", "\xf0\x80\x80\xaf", "/",
-	"\xc1\x9c", `\`, "\xe0\x81\x9c", `\`, "\xf0\x80\x81\x9c", `\`,
+	"\xc0\xae", ".", "\xe0\x80\xae", ".", "\xf0\x80\x80\xae", ".", "\xf8\x80\x80\x80\xae", ".", "\xfc\x80\x80\x80\x80\xae", ".",
+	"\xc0\xaf", "/", "\xe0\x80\xaf", "/", "\xf0\x80\x80\xaf", "/", "\xf8\x80\x80\x80\xaf", "/", "\xfc\x80\x80\x80\x80\xaf", "/",
+	"\xc1\x9c", `\`, "\xe0\x81\x9c", `\`, "\xf0\x80\x81\x9c", `\`, "\xf8\x80\x80\x81\x9c", `\`, "\xfc\x80\x80\x80\x81\x9c", `\`,
 )
 
 // hasDotSegment reports whether a decoded path has a segment that some server
-// reads as "." or "..": separated by "\" too, with ";params", look-alikes,
-// and trailing dots, spaces and control bytes accounted for (D108).
+// reads as "." or "..": separated by "\" too, cut at ";", "?", "#" or a control
+// byte, with look-alikes and trailing dots and spaces accounted for (D108).
 func hasDotSegment(path string) bool {
 	for _, seg := range strings.FieldsFunc(lookalikes.Replace(path), func(c rune) bool { return c == '/' || c == '\\' }) {
-		seg, _, _ = strings.Cut(seg, ";")
+		if i := strings.IndexFunc(seg, func(c rune) bool { return c == ';' || c == '?' || c == '#' || c < ' ' || c == 0x7f }); i >= 0 {
+			seg = seg[:i]
+		}
 		trimmed := strings.TrimRightFunc(seg, func(c rune) bool { return c == '.' || c <= ' ' || c == 0x7f || unicode.IsSpace(c) })
 		if strings.HasPrefix(seg, ".") && trimmed == "" {
 			return true
