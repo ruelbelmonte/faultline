@@ -28,7 +28,7 @@ proxy:
   admin_listen: 0.0.0.0:7702
 control:
   listen: 0.0.0.0:7700
-  proxy_admin_url: http://faultline-proxy.internal:7702
+  proxy_admin_url: https://faultline-proxy.internal:7702
 ```
 
 Both workloads read the same `faultline.yaml`.
@@ -38,7 +38,7 @@ Both workloads read the same `faultline.yaml`.
 | Port | Who needs it | How to expose it |
 |---|---|---|
 | 7701 proxy traffic | the services under test | Private network only. It has no authentication: anyone who can reach it can call your upstreams through it. Restrict it with a network policy or security group to the services that are configured to use it. |
-| 7702 proxy admin | the control plane only | Private network only, restricted to the control plane's address. Never publish it. It can install faults for all traffic. |
+| 7702 proxy admin | the control plane only | Private network only, restricted to the control plane's address. Never publish it. It can install faults for all traffic. When proxy and control run on different hosts, put TLS in front of it (a sidecar or internal load balancer) and give control an `https://` `proxy_admin_url`. Control refuses an `http://` URL to a host that isn't loopback, because the admin token would cross the network in clear text, unless `control.allow_insecure_admin: true` is set. Control verifies the certificate against the system's trusted CAs. |
 | 7700 control API and dashboard | engineers and CI | Behind a TLS terminating reverse proxy or load balancer, restricted to your VPN or office network. Faultline speaks plain HTTP; without TLS in front, the bearer token crosses the network in clear text. The CLI warns when it is about to do that. |
 
 Faultline does not terminate TLS itself. Calls from the proxy to an `https://` upstream are verified as usual.
@@ -89,6 +89,7 @@ Logs are structured (`--log-format json`). They contain run ids, route names, me
 - [ ] `environment: qa`, `control.allow_unscoped: false`, `control.allow_commands: false`, `control.allowed_hosts` set.
 - [ ] Proxy and control run as separate workloads from the same config.
 - [ ] 7702 is reachable from the control plane only; 7701 from the services under test only.
+- [ ] `control.proxy_admin_url` is `https://` (or loopback), and `control.allow_insecure_admin` is not set.
 - [ ] 7700 is behind TLS and network restrictions.
 - [ ] Both tokens come from the secret store, are different, and are at least 32 random bytes.
 - [ ] Services forward `X-Chaos-Run` and `X-Chaos-Correlation`.
