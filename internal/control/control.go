@@ -182,7 +182,7 @@ func Serve(ctx context.Context, cfg *config.Config, token, adminToken string, lo
 	if err != nil {
 		return fmt.Errorf("control listen: %w", err)
 	}
-	srv := &http.Server{Handler: c.Handler(), ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 64 << 10}
+	srv := newServer(c.Handler())
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	log.Info("control listening", "addr", ln.Addr().String(), "environment", cfg.Environment, "proxy_admin_url", cfg.ProxyAdminURL)
@@ -206,6 +206,14 @@ func Serve(ctx context.Context, cfg *config.Config, token, adminToken string, lo
 		return nil
 	}
 	return err
+}
+
+// Request bodies here are small and capped, so a slow sender is cut off. SSE
+// responses are unaffected: ReadTimeout ends when the request has been read.
+var serverTimeouts = struct{ read, idle time.Duration }{30 * time.Second, 120 * time.Second}
+
+func newServer(h http.Handler) *http.Server {
+	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: serverTimeouts.read, IdleTimeout: serverTimeouts.idle, MaxHeaderBytes: 64 << 10}
 }
 
 // HostWarning is the startup warning for a shared environment whose probe

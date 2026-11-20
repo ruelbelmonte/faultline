@@ -28,11 +28,8 @@ func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.L
 		return fmt.Errorf("proxy admin listen: %w", err)
 	}
 
-	traffic := &http.Server{
-		Handler: p, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 1 << 20,
-		ConnContext: func(ctx context.Context, c net.Conn) context.Context { return context.WithValue(ctx, connKey{}, c) },
-	}
-	admin := &http.Server{Handler: p.Admin(adminToken), ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 64 << 10}
+	traffic := newTrafficServer(p)
+	admin := newAdminServer(p.Admin(adminToken))
 
 	stopWatch := make(chan struct{})
 	go p.engine.Watch(stopWatch)
@@ -62,4 +59,19 @@ func Run(ctx context.Context, cfg *config.Config, adminToken string, log *slog.L
 		return nil
 	}
 	return err
+}
+
+var serverTimeouts = struct{ read, idle time.Duration }{30 * time.Second, 120 * time.Second}
+
+// The traffic listener has no ReadTimeout: request bodies must stream for as
+// long as the client takes (PRD 8.1, D111).
+func newTrafficServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: serverTimeouts.idle, MaxHeaderBytes: 1 << 20,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context { return context.WithValue(ctx, connKey{}, c) },
+	}
+}
+
+func newAdminServer(h http.Handler) *http.Server {
+	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: serverTimeouts.read, IdleTimeout: serverTimeouts.idle, MaxHeaderBytes: 64 << 10}
 }
