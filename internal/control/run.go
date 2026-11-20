@@ -728,6 +728,7 @@ func (r *Run) findingsInputLocked(completed bool) findings.Input {
 		RecoverySeconds:             r.doc.RecoverySeconds,
 		RecoveryTimeoutS:            r.exp.RecoveryTimeout.Seconds(),
 		ClearedAt:                   r.injEnd,
+		InjectionEnd:                r.injStart.Add(r.exp.Duration),
 	}
 	for i, f := range r.exp.Faults {
 		in.Faults = append(in.Faults, findings.Fault{ID: f.ID, Route: f.Route, Match: f.Match, Triggers: r.doc.Faults[i].Triggers})

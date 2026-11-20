@@ -129,6 +129,26 @@ func TestRetryAmplification(t *testing.T) {
 	none(t, Evaluate(Input{Records: anonymous, RetryAmplificationThreshold: 3}), RetryAmplification)
 }
 
+func TestRetryAmplificationCountsOnlyRequestsStartedDuringInjection(t *testing.T) {
+	var recs []fault.Record
+	for _, c := range []string{"a", "b"} {
+		for i := 0; i < 4; i++ {
+			recs = append(recs, rec(c, float64(i)*10, faulted("f1")))
+		}
+	}
+	// Faulted until the end of injection at 100 ms, then retried after it.
+	recs = append(recs, rec("c", 70, faulted("f1")), rec("c", 90, faulted("f1")), rec("c", 110), rec("c", 120))
+	// Arrived after injection, before the clear: one attempt each, never faulted.
+	for _, c := range []string{"d", "e", "f", "g", "h", "i", "j", "k", "l", "m"} {
+		recs = append(recs, rec(c, 150))
+	}
+	in := Input{Records: recs, RetryAmplificationThreshold: 3, InjectionEnd: t0.Add(100 * time.Millisecond)}
+	e := one(t, Evaluate(in), RetryAmplification).Evidence
+	if e["mean_attempts"] != 4.0 || e["correlations"] != 3 {
+		t.Fatalf("only the three logical requests sent during injection count: %+v", e)
+	}
+}
+
 func TestRetryAmplificationIsPerRoute(t *testing.T) {
 	var recs []fault.Record
 	for i := 0; i < 4; i++ {

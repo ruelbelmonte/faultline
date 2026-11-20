@@ -114,7 +114,7 @@ Findings are rule-based. Each one carries the numbers that triggered it in `evid
 | id | Reported when | Severity | Evidence |
 |---|---|---|---|
 | `steady_state_breach` | a hypothesis entry did not pass (one finding each) | high | `name`, `threshold`, `observed` |
-| `retry_amplification` | on a faulted route, mean attempts per correlation id >= `findings.retry_amplification_threshold` | medium; high at twice the threshold | `route`, `mean_attempts`, `max_attempts`, `correlations` |
+| `retry_amplification` | on a faulted route, mean attempts per correlation id whose first request arrived during injection >= `findings.retry_amplification_threshold` | medium; high at twice the threshold | `route`, `mean_attempts`, `max_attempts`, `correlations` |
 | `retry_without_backoff` | within a correlation, the next attempt on the same route arrives less than 50 ms after a faulted response | medium | `route`, `occurrences`, `median_gap_ms` |
 | `retry_after_ignored` | within a correlation, the next attempt arrives earlier than 0.9 x the `Retry-After` the proxy sent | medium | `route`, `violations`, `retry_after_s`, `median_gap_ms` |
 | `missing_timeout` | for a `timeout` fault, the median time callers stayed connected is >= 0.9 x `hold` | high | `route`, `hold_ms`, `median_client_held_ms`, `samples` |
