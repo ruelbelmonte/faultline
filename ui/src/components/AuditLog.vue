@@ -32,6 +32,7 @@ onMounted(load)
         <tr>
           <th scope="col">Time</th>
           <th scope="col">Actor</th>
+          <th scope="col">Source</th>
           <th scope="col">Action</th>
           <th scope="col">Run</th>
           <th scope="col">Detail</th>
@@ -41,6 +42,7 @@ onMounted(load)
         <tr v-for="(e, i) in entries" :key="i">
           <td>{{ time(e.ts) }}</td>
           <td>{{ e.actor }}</td>
+          <td><code v-if="e.source_ip">{{ e.source_ip }}</code></td>
           <td><code>{{ e.action }}</code></td>
           <td>
             <a v-if="e.run_id" :href="`#/runs/${e.run_id}`"><code>{{ e.run_id }}</code></a>
@@ -48,7 +50,7 @@ onMounted(load)
           <td>{{ evidence(e.detail) }}</td>
         </tr>
         <tr v-if="loaded && entries.length === 0">
-          <td colspan="5" class="muted">Nothing has been recorded yet.</td>
+          <td colspan="6" class="muted">Nothing has been recorded yet.</td>
         </tr>
       </tbody>
     </table>

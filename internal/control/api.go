@@ -3,14 +3,17 @@ package control
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,9 +39,61 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
 
-func (c *Control) authorised(r *http.Request) bool {
+// authenticate returns the name of the token the request carries. Every token
+// is compared, in constant time, so the timing shows neither whether nor
+// which one matched.
+func (c *Control) authenticate(r *http.Request) (string, bool) {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(c.token)) == 1
+	sum := sha256.Sum256([]byte(got))
+	match := -1
+	for i, t := range c.tokens {
+		match = subtle.ConstantTimeSelect(subtle.ConstantTimeCompare(sum[:], t.Sum[:]), i, match)
+	}
+	if !ok || got == "" || match < 0 {
+		return "", false
+	}
+	return c.tokens[match].Name, true
+}
+
+type actorKey struct{}
+
+func actorFrom(r *http.Request) Actor {
+	a, _ := r.Context().Value(actorKey{}).(Actor)
+	return a
+}
+
+// clientIP is the request's source address: the TCP peer, or, when the peer
+// is a trusted proxy, the rightmost X-Forwarded-For entry that is not one.
+// Entries left of an untrusted hop could be written by anyone (D112).
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
+	peer, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	addr := peer.Addr().Unmap()
+	isTrusted := func(a netip.Addr) bool {
+		return slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(a) })
+	}
+	if !isTrusted(addr) {
+		return addr.String()
+	}
+	client := addr
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		h := strings.TrimSpace(hops[i])
+		if h == "" {
+			continue
+		}
+		a, err := netip.ParseAddr(h)
+		if err != nil {
+			return addr.String()
+		}
+		client = a.Unmap()
+		if !isTrusted(client) {
+			break
+		}
+	}
+	return client.String()
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -77,11 +132,13 @@ func (c *Control) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		if !c.authorised(r) {
+		name, ok := c.authenticate(r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		api.ServeHTTP(w, r)
+		actor := Actor{Name: "token:" + name, IP: clientIP(r, c.cfg.TrustedProxies)}
+		api.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, actor)))
 	})
 	mux.Handle("/", ui.Handler())
 	return mux
@@ -210,7 +267,7 @@ func (c *Control) handleExperimentPut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "write_failed")
 		return
 	}
-	c.audit(ActorToken, "experiment_saved", "", map[string]any{"name": name, "file": file})
+	c.audit(actorFrom(r), "experiment_saved", "", map[string]any{"name": name, "file": file})
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "file": file})
 }
 
@@ -239,7 +296,7 @@ func (c *Control) handleRunCreate(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	id, err := c.CreateRun([]byte(body.ExperimentYAML))
+	id, err := c.CreateRun([]byte(body.ExperimentYAML), actorFrom(r))
 	var verrs yamlx.Errors
 	switch {
 	case errors.As(err, &verrs):
@@ -310,7 +367,7 @@ func (c *Control) handleAbort(w http.ResponseWriter, r *http.Request) {
 		notActive()
 		return
 	}
-	run.abort(ReasonManual, ActorToken)
+	run.abort(ReasonManual, actorFrom(r))
 	select {
 	case <-run.done:
 	case <-time.After(20 * time.Second):
@@ -332,10 +389,10 @@ func (c *Control) handleKill(w http.ResponseWriter, r *http.Request) {
 	clearErr := c.proxy.Clear(ctx)
 	cancel()
 	runID := ""
-	if run := c.abortActive(ReasonKillSwitch, ActorToken); run != nil {
+	if run := c.abortActive(ReasonKillSwitch, actorFrom(r)); run != nil {
 		runID = run.id
 	}
-	c.audit(ActorToken, "kill_switch", runID, map[string]any{"cleared": clearErr == nil})
+	c.audit(actorFrom(r), "kill_switch", runID, map[string]any{"cleared": clearErr == nil})
 	if clearErr != nil {
 		c.log.Error("kill switch could not reach the proxy", "error", clearErr.Error())
 		writeJSON(w, http.StatusBadGateway, map[string]any{"cleared": false, "error": "proxy_unreachable"})

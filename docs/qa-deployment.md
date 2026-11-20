@@ -48,7 +48,15 @@ Faultline does not terminate TLS itself. Calls from the proxy to an `https://` u
 - `FAULTLINE_TOKEN` authenticates the control API and the dashboard. `FAULTLINE_ADMIN_TOKEN` authenticates the proxy admin API and is needed by both workloads.
 - Use two different random values of at least 32 bytes (`openssl rand -hex 32`). Both processes refuse to start with a missing token or one shorter than 16 characters.
 - Inject them from your secret store as environment variables. They never go in `faultline.yaml`, and Faultline never logs them.
-- There is one control token for everyone: no user accounts, no roles. The audit log records what was done, not who did it. Treat the token like a shared admin password and rotate it by restarting both workloads with new values.
+- Give each person and each CI pipeline its own control token, so the audit log records who did what. Put one `name:sha256hex` line per token in a file and point `FAULTLINE_TOKENS_FILE` at it instead of setting `FAULTLINE_TOKEN`. Control refuses to start with both set. Names use lowercase letters, digits and hyphens. Each person keeps their own token value in their own `FAULTLINE_TOKEN` for the CLI and the dashboard; only the hash goes in the file:
+
+  ```sh
+  tok=$(openssl rand -hex 32)                                   # give this to alice, once
+  printf 'alice:%s\n' "$(printf %s "$tok" | sha256sum | cut -d' ' -f1)" >> tokens
+  ```
+
+  Every token has the same rights; there are no roles. Audit entries then carry `actor: token:alice`, and `token:default` when `FAULTLINE_TOKEN` is used. To revoke a token, remove its line and restart control.
+- Audit entries also carry `source_ip`. Behind a TLS-terminating reverse proxy that is the proxy's address, unless you list the proxy in `control.trusted_proxies` (IP addresses or CIDR ranges). Control then takes the client address from `X-Forwarded-For`: the rightmost entry that is not itself a trusted proxy. Entries further left can be written by any client, so they are ignored.
 
 ## Keeping other people's traffic safe
 
@@ -92,5 +100,6 @@ Logs are structured (`--log-format json`). They contain run ids, route names, me
 - [ ] `control.proxy_admin_url` is `https://` (or loopback), and `control.allow_insecure_admin` is not set.
 - [ ] 7700 is behind TLS and network restrictions.
 - [ ] Both tokens come from the secret store, are different, and are at least 32 random bytes.
+- [ ] Each person and each pipeline has its own control token in `FAULTLINE_TOKENS_FILE`, and `control.trusted_proxies` lists the reverse proxy in front of 7700.
 - [ ] Services forward `X-Chaos-Run` and `X-Chaos-Correlation`.
 - [ ] Experiments have `abort` thresholds, and the team knows where the kill switch is.

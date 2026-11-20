@@ -2,8 +2,14 @@
 package config
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -16,6 +22,7 @@ import (
 
 const (
 	EnvToken      = "FAULTLINE_TOKEN"
+	EnvTokensFile = "FAULTLINE_TOKENS_FILE"
 	EnvAdminToken = "FAULTLINE_ADMIN_TOKEN"
 	MinTokenLen   = 16
 )
@@ -53,6 +60,9 @@ type Config struct {
 	// (path.Match patterns on host or host:port). Empty allows any host
 	// except link-local and metadata addresses.
 	AllowedHosts []string
+	// TrustedProxies are the reverse proxies whose X-Forwarded-For control
+	// believes when it records a request's source address.
+	TrustedProxies []netip.Prefix
 
 	ScopeHeader       string
 	CorrelationHeader string
@@ -208,6 +218,20 @@ func Parse(data []byte) (*Config, error) {
 				c.AllowedHosts = append(c.AllowedHosts, v)
 			}
 		}
+		for _, it := range m.Seq("trusted_proxies") {
+			if v, ok := it.Str(); ok {
+				v = strings.TrimSpace(v)
+				p, err := netip.ParsePrefix(v)
+				if a, aerr := netip.ParseAddr(v); err != nil && aerr == nil {
+					p, err = a.Prefix(a.BitLen())
+				}
+				if err != nil {
+					errs.Add(it.Path, "must be an IP address or CIDR range such as 10.0.0.0/8")
+					continue
+				}
+				c.TrustedProxies = append(c.TrustedProxies, p.Masked())
+			}
+		}
 		m.Done()
 	}
 
@@ -356,6 +380,67 @@ func EnvWithoutTokens(environ []string) []string {
 }
 
 // Token reads a required bearer token from the environment.
+// NamedToken is a control token known by its SHA-256 only.
+type NamedToken struct {
+	Name string
+	Sum  [sha256.Size]byte
+}
+
+// LoadTokens reads the control tokens: FAULTLINE_TOKEN as the single token
+// named "default", or FAULTLINE_TOKENS_FILE with one "name:sha256hex" per
+// line. Setting both is an error, so a shared token cannot linger unnoticed
+// beside named ones. Errors never repeat a hash.
+func LoadTokens() ([]NamedToken, error) {
+	file := os.Getenv(EnvTokensFile)
+	if os.Getenv(EnvToken) != "" && file != "" {
+		return nil, fmt.Errorf("set %s or %s, not both", EnvToken, EnvTokensFile)
+	}
+	if file == "" {
+		tok, err := Token(EnvToken)
+		if err != nil {
+			return nil, fmt.Errorf("%w (or set %s)", err, EnvTokensFile)
+		}
+		return []NamedToken{{Name: "default", Sum: sha256.Sum256([]byte(tok))}}, nil
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", EnvTokensFile, errors.Unwrap(err))
+	}
+	var out []NamedToken
+	names, sums := map[string]bool{}, map[[sha256.Size]byte]bool{}
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for n := 1; sc.Scan(); n++ {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, h, ok := strings.Cut(line, ":")
+		name, h = strings.TrimSpace(name), strings.TrimSpace(h)
+		raw, herr := hex.DecodeString(h)
+		switch {
+		case !ok || herr != nil || len(raw) != sha256.Size:
+			return nil, fmt.Errorf("%s line %d: must be name:sha256hex (64 hex digits)", EnvTokensFile, n)
+		case !NameRE.MatchString(name):
+			return nil, fmt.Errorf("%s line %d: the name may only contain lowercase letters, digits and hyphens", EnvTokensFile, n)
+		case names[name]:
+			return nil, fmt.Errorf("%s line %d: duplicate name %s", EnvTokensFile, n, name)
+		}
+		t := NamedToken{Name: name, Sum: [sha256.Size]byte(raw)}
+		if t.Sum == sha256.Sum256(nil) {
+			return nil, fmt.Errorf("%s line %d: that is the hash of an empty token", EnvTokensFile, n)
+		}
+		if sums[t.Sum] {
+			return nil, fmt.Errorf("%s line %d: the same token is listed twice", EnvTokensFile, n)
+		}
+		names[name], sums[t.Sum] = true, true
+		out = append(out, t)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s lists no tokens", EnvTokensFile)
+	}
+	return out, nil
+}
+
 func Token(env string) (string, error) {
 	v := os.Getenv(env)
 	if v == "" {

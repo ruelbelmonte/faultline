@@ -31,7 +31,10 @@ const (
 	abortMinRequests      = 10
 )
 
-type abortCause struct{ reason, actor string }
+type abortCause struct {
+	reason string
+	actor  Actor
+}
 
 func (a abortCause) Error() string { return "aborted: " + a.reason }
 
@@ -201,7 +204,7 @@ func (r *Run) setStatus(status string) {
 	r.c.log.Info("run status", "run_id", r.id, "status", status)
 }
 
-func (r *Run) abort(reason, actor string) {
+func (r *Run) abort(reason string, actor Actor) {
 	r.cancel(abortCause{reason, actor})
 }
 

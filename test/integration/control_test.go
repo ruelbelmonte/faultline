@@ -4,6 +4,8 @@ package integration
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -167,7 +169,7 @@ func TestRunPassed(t *testing.T) {
 			Detail            map[string]any
 		}
 		f.control.api(t, "GET", "/api/v1/audit", nil, &audit)
-		if len(audit) != 1 || audit[0].Action != "run_created" || audit[0].Actor != "api-token" || audit[0].RunID != id {
+		if len(audit) != 1 || audit[0].Action != "run_created" || audit[0].Actor != "token:default" || audit[0].RunID != id {
 			t.Fatalf("unexpected audit log: %+v", audit)
 		}
 		data, err := os.ReadFile(filepath.Join(f.s.dataDir, "audit.jsonl"))
@@ -858,6 +860,78 @@ func TestExperimentPutKeepsFilesOnDisk(t *testing.T) {
 	var resp map[string]any
 	if code := f.control.api(t, "PUT", "/api/v1/experiments/dup", obj{"yaml": legacyEdited}, &resp); code != 409 || resp["error"] != "ambiguous_experiment_file" {
 		t.Fatalf("PUT with both dup.yaml and dup.yml: expected 409 ambiguous_experiment_file, got %d %v", code, resp)
+	}
+}
+
+// Issue #17: each named token's actions are attributed to it, with the
+// source address, and no token value is ever written anywhere.
+func TestNamedTokensAttributeAuditEntries(t *testing.T) {
+	const alice, bob = "itest-alice-token-0123456789", "itest-bob-token-0123456789"
+	sum := func(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+	f := startFull(t, "naive")
+	file := filepath.Join(f.s.dir, "tokens")
+	if err := os.WriteFile(file, []byte("# synthetic test tokens\nalice:"+sum(alice)+"\nbob:"+sum(bob)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	both := start(t, "faultline", []string{"FAULTLINE_TOKEN=" + controlToken, "FAULTLINE_TOKENS_FILE=" + file, "FAULTLINE_ADMIN_TOKEN=" + adminToken}, "control", "--config", f.s.cfgPath)
+	if code := both.wait(10 * time.Second); code != 2 || !strings.Contains(both.out.String(), "not both") {
+		t.Fatalf("both token variables set: expected exit 2 naming both, got %d: %s", code, both.out.String())
+	}
+
+	f.control.proc.cmd.Process.Kill()
+	f.control.proc.wait(10 * time.Second)
+	c := f.s.startControl(t, "FAULTLINE_TOKEN=", "FAULTLINE_TOKENS_FILE="+file)
+	if code := apiCall(t, "GET", c.url("/api/v1/runs"), controlToken, nil, nil); code != 401 {
+		t.Fatalf("the shared token must stop working once a tokens file is used, got %d", code)
+	}
+
+	var created struct {
+		RunID string `json:"run_id"`
+	}
+	if code := apiCall(t, "POST", c.url("/api/v1/runs"), alice, obj{"experiment_yaml": f.experiment(t, expOpts{Duration: "30s"})}, &created); code != 201 {
+		t.Fatalf("alice creating a run: %d", code)
+	}
+	if code := apiCall(t, "POST", c.url("/api/v1/kill"), bob, nil, nil); code != 200 {
+		t.Fatalf("bob pressing the kill switch: %d", code)
+	}
+	eventually(t, 20*time.Second, "the run is aborted", func() bool {
+		var doc struct{ Status string }
+		apiCall(t, "GET", c.url("/api/v1/runs/"+created.RunID), alice, nil, &doc)
+		return doc.Status == "aborted"
+	})
+
+	var audit []struct {
+		Actor    string
+		SourceIP string `json:"source_ip"`
+		Action   string
+	}
+	apiCall(t, "GET", c.url("/api/v1/audit"), bob, nil, &audit)
+	got := map[string]string{}
+	for _, e := range audit {
+		got[e.Action] = e.Actor + "@" + e.SourceIP
+	}
+	for action, want := range map[string]string{"run_created": "token:alice@127.0.0.1", "kill_switch": "token:bob@127.0.0.1", "run_aborted": "token:bob@127.0.0.1"} {
+		if got[action] != want {
+			t.Errorf("%s: expected %s, got %q (%+v)", action, want, got[action], audit)
+		}
+	}
+
+	jsonl, _ := os.ReadFile(filepath.Join(f.s.dataDir, "audit.jsonl"))
+	req, _ := http.NewRequest("GET", c.url("/api/v1/audit"), nil)
+	req.Header.Set("Authorization", "Bearer "+alice)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	for where, data := range map[string]string{"audit.jsonl": string(jsonl), "audit API": string(apiBody), "control log": c.out.String()} {
+		for _, secret := range []string{alice, bob, sum(alice), sum(bob)} {
+			if strings.Contains(data, secret) {
+				t.Errorf("%s contains a token or its hash", where)
+			}
+		}
 	}
 }
 

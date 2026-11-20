@@ -19,28 +19,28 @@ var ErrRunActive = errors.New("a run is already active")
 
 // Control owns the store, the proxy client and at most one active run.
 type Control struct {
-	cfg   *config.Config
-	store *Store
-	proxy *ProxyClient
-	log   *slog.Logger
-	token string
+	cfg    *config.Config
+	store  *Store
+	proxy  *ProxyClient
+	log    *slog.Logger
+	tokens []config.NamedToken
 
 	mu     sync.Mutex
 	active *Run
 }
 
-func New(cfg *config.Config, token, adminToken string, log *slog.Logger) (*Control, error) {
+func New(cfg *config.Config, tokens []config.NamedToken, adminToken string, log *slog.Logger) (*Control, error) {
 	store, err := OpenStore(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
 	return &Control{
-		cfg: cfg, store: store, log: log, token: token,
+		cfg: cfg, store: store, log: log, tokens: tokens,
 		proxy: NewProxyClient(cfg.ProxyAdminURL, adminToken),
 	}, nil
 }
 
-func (c *Control) audit(actor, action, runID string, detail map[string]any) {
+func (c *Control) audit(actor Actor, action, runID string, detail map[string]any) {
 	if err := c.store.Audit(actor, action, runID, detail); err != nil {
 		c.log.Error("writing audit log failed", "action", action, "error", err.Error())
 	}
@@ -48,7 +48,7 @@ func (c *Control) audit(actor, action, runID string, detail map[string]any) {
 
 // CreateRun validates an experiment and starts it. Validation problems come
 // back as yamlx.Errors.
-func (c *Control) CreateRun(rawYAML []byte) (string, error) {
+func (c *Control) CreateRun(rawYAML []byte, actor Actor) (string, error) {
 	exp, errs := experiment.Parse(rawYAML, c.cfg)
 	if len(errs) > 0 {
 		return "", errs
@@ -74,7 +74,7 @@ func (c *Control) CreateRun(rawYAML []byte) (string, error) {
 	c.mu.Unlock()
 
 	r.persist()
-	c.audit(ActorToken, "run_created", r.id, map[string]any{"experiment": exp.Name})
+	c.audit(actor, "run_created", r.id, map[string]any{"experiment": exp.Name})
 	c.log.Info("run created", "run_id", r.id, "experiment", exp.Name)
 	go r.run()
 	return r.id, nil
@@ -95,7 +95,7 @@ func (c *Control) activeRun() *Run {
 }
 
 // abortActive aborts the active run, if any, and waits for it to finish.
-func (c *Control) abortActive(reason, actor string) *Run {
+func (c *Control) abortActive(reason string, actor Actor) *Run {
 	r := c.activeRun()
 	if r == nil {
 		return nil
@@ -169,8 +169,8 @@ func (c *Control) recoverUnfinished() error {
 }
 
 // Serve runs the control plane until ctx is cancelled.
-func Serve(ctx context.Context, cfg *config.Config, token, adminToken string, log *slog.Logger) error {
-	c, err := New(cfg, token, adminToken, log)
+func Serve(ctx context.Context, cfg *config.Config, tokens []config.NamedToken, adminToken string, log *slog.Logger) error {
+	c, err := New(cfg, tokens, adminToken, log)
 	if err != nil {
 		return err
 	}

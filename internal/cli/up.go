@@ -24,8 +24,9 @@ func (e *env) cmdControl(args []string) int {
 	if cfg == nil {
 		return code
 	}
-	token, ok := e.requireToken(config.EnvToken)
-	if !ok {
+	tokens, err := config.LoadTokens()
+	if err != nil {
+		fmt.Fprintf(e.stderr, "faultline: %v\n", err)
 		return exitUsage
 	}
 	adminToken, ok := e.requireToken(config.EnvAdminToken)
@@ -34,7 +35,7 @@ func (e *env) cmdControl(args []string) int {
 	}
 	ctx, cancel := serveContext()
 	defer cancel()
-	if err := control.Serve(ctx, cfg, token, adminToken, log); err != nil && !errors.Is(err, context.Canceled) {
+	if err := control.Serve(ctx, cfg, tokens, adminToken, log); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(e.stderr, "faultline: %v\n", err)
 		return exitInternal
 	}
@@ -89,7 +90,17 @@ func (e *env) cmdUp(args []string) int {
 
 	tokens := map[string]string{}
 	generated := map[string]bool{}
-	for _, name := range []string{config.EnvToken, config.EnvAdminToken} {
+	needed := []string{config.EnvToken, config.EnvAdminToken}
+	if file := os.Getenv(config.EnvTokensFile); file != "" {
+		// Control validates the file; up only checks that it is not combined with a shared token.
+		if os.Getenv(config.EnvToken) != "" {
+			fmt.Fprintf(e.stderr, "faultline: set %s or %s, not both\n", config.EnvToken, config.EnvTokensFile)
+			return exitUsage
+		}
+		tokens[config.EnvTokensFile] = file
+		needed = needed[1:]
+	}
+	for _, name := range needed {
 		if os.Getenv(name) == "" {
 			tok, err := newToken()
 			if err != nil {
@@ -177,7 +188,10 @@ func (e *env) cmdUp(args []string) int {
 			fmt.Fprintf(e.stdout, "  Dashboard:    %s\n", displayURL(cfg.ControlListen))
 			fmt.Fprintf(e.stdout, "  Proxy:        %s\n", displayURL(cfg.ProxyListen))
 			fmt.Fprintf(e.stdout, "  Proxy admin:  %s\n", displayURL(cfg.ProxyAdminListen))
-			for _, name := range []string{config.EnvToken, config.EnvAdminToken} {
+			for _, name := range []string{config.EnvToken, config.EnvTokensFile, config.EnvAdminToken} {
+				if tokens[name] == "" {
+					continue
+				}
 				if generated[name] {
 					// Shown once, never logged. Paste into your shell to use the CLI.
 					fmt.Fprintf(e.stdout, "%s=%s\n", name, tokens[name])
@@ -228,12 +242,16 @@ func waitHealthy(ctx context.Context, urls ...string) bool {
 // childEnv is the environment of the `up` child named name ("proxy" or
 // "control"): the parent's environment without any Faultline token, plus
 // only the tokens that child needs. The proxy needs the admin token alone;
-// control needs both.
+// control also needs the control token or the tokens file.
 func childEnv(name string, environ []string, tokens map[string]string) []string {
 	env := append(config.EnvWithoutTokens(environ), envParentWatch+"=1",
 		config.EnvAdminToken+"="+tokens[config.EnvAdminToken])
 	if name == "control" {
-		env = append(env, config.EnvToken+"="+tokens[config.EnvToken])
+		for _, k := range []string{config.EnvToken, config.EnvTokensFile} {
+			if tokens[k] != "" {
+				env = append(env, k+"="+tokens[k])
+			}
+		}
 	}
 	return env
 }
