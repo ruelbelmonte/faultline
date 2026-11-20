@@ -53,6 +53,9 @@ type Input struct {
 	RecoveryTimeoutS float64
 	// ClearedAt is when the faults were removed. Zero if they never were.
 	ClearedAt time.Time
+	// InjectionEnd is the planned end of injection. The retry rules ignore
+	// correlations whose first request arrived at or after it (D114).
+	InjectionEnd time.Time
 }
 
 func round(v float64, decimals int) float64 {
@@ -202,7 +205,7 @@ func retryFindings(in Input, ev Evidence) ([]report.Finding, error) {
 	}
 	err = ev.Attempts(func(route string, attempts []Attempt) {
 		s := stats[route]
-		if s == nil {
+		if s == nil || (!in.InjectionEnd.IsZero() && !attempts[0].TS.Before(in.InjectionEnd)) {
 			return
 		}
 		s.correlations++
